@@ -2,6 +2,9 @@
 
 从北京市住建委网站自动抓取存量房网上签约数据，包括月度统计（经纪机构、区县、面积）和每日签约数据。
 
+[![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 ## 功能特性
 
 - ✅ 自动抓取上一个月的存量房签约数据
