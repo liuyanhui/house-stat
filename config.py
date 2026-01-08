@@ -1,23 +1,27 @@
 """
 房地产签约数据抓取程序 - 配置文件
 """
+import os
+
+# 获取脚本文件所在目录的绝对路径
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 数据源 URL
 BASE_URL = "http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749"
 
-# 目录配置
-DATA_DIR = "data"      # 数据文件目录
-LOG_DIR = "log"        # 日志文件目录
+# 目录配置（使用绝对路径）
+DATA_DIR = os.path.join(SCRIPT_DIR, "data")      # 数据文件目录
+LOG_DIR = os.path.join(SCRIPT_DIR, "log")        # 日志文件目录
 
-# CSV 文件路径
-AGENCY_CSV = f"{DATA_DIR}/month_agency.csv"
-DISTRICT_CSV = f"{DATA_DIR}/month_district.csv"
-AREA_CSV = f"{DATA_DIR}/month_area.csv"
-DAILY_CSV = f"{DATA_DIR}/daily.csv"  # 每日存量房网上签约数据
-MONTH_CSV = f"{DATA_DIR}/month.csv"  # 月度汇总数据（网上签约套数、网上签约面积、住宅签约套数、住宅签约面积）
+# CSV 文件路径（使用os.path.join跨平台兼容）
+AGENCY_CSV = os.path.join(DATA_DIR, "month_agency.csv")
+DISTRICT_CSV = os.path.join(DATA_DIR, "month_district.csv")
+AREA_CSV = os.path.join(DATA_DIR, "month_area.csv")
+DAILY_CSV = os.path.join(DATA_DIR, "daily.csv")  # 每日存量房网上签约数据
+MONTH_CSV = os.path.join(DATA_DIR, "month.csv")  # 月度汇总数据（网上签约套数、网上签约面积、住宅签约套数、住宅签约面积）
 
 # 日志文件路径
-LOG_FILE = f"{LOG_DIR}/house_stat.log"
+LOG_FILE = os.path.join(LOG_DIR, "house_stat.log")
 
 # 需要创建的目录列表
 DIRECTORIES = [DATA_DIR, LOG_DIR]
