@@ -535,11 +535,11 @@ def save_to_csv(df, csv_file, key_column, logger):
         logger: 日志记录器
 
     返回:
-        (新增条数, 跳过条数)
+        (新增条数, 跳过条数, 新增数据的DataFrame)
     """
     if df.empty:
         logger.warning(f"数据为空，跳过保存：{csv_file}")
-        return 0, 0
+        return 0, 0, pd.DataFrame()
 
     try:
         # 检查文件是否存在
@@ -566,17 +566,114 @@ def save_to_csv(df, csv_file, key_column, logger):
             else:
                 logger.info(f"没有新数据需要添加到 {csv_file}")
 
-            return len(new_data), duplicates
+            return len(new_data), duplicates, new_data
 
         else:
             # 创建新文件
             df.to_csv(csv_file, index=False, encoding=config.CSV_ENCODING)
             logger.info(f"创建新文件 {csv_file}，写入 {len(df)} 条数据")
-            return len(df), 0
+            return len(df), 0, df
 
     except Exception as e:
         logger.error(f"保存数据到 {csv_file} 失败：{e}")
-        return 0, 0
+        return 0, 0, pd.DataFrame()
+
+
+def display_results(year_month, new_df_daily, new_df_month, new_df_agency, new_df_district, new_df_area):
+    """
+    在控制台展示需要更新（新增）到文件的数据
+    """
+    W = 70  # 总宽度
+    has_new = not (new_df_daily.empty and new_df_month.empty
+                   and new_df_agency.empty and new_df_district.empty and new_df_area.empty)
+
+    print()
+    print("=" * W)
+    if has_new:
+        print("  存量房网上签约数据 - 新增数据".center(W - 4))
+    else:
+        print("  存量房网上签约数据 - 无新增".center(W - 4))
+    print("=" * W)
+
+    if not has_new:
+        print()
+        print(f"  目标数据月份：{year_month}")
+        print("  所有数据均已存在，无需更新。")
+        print()
+        print("=" * W)
+        print()
+        return
+
+    print()
+    print(f"  目标数据月份：{year_month}")
+
+    # --- 1. 每日数据 ---
+    if not new_df_daily.empty:
+        print()
+        print("-" * W)
+        print("  [ 新增 - 每日签约数据 ]")
+        print("-" * W)
+        for _, row in new_df_daily.iterrows():
+            print(f"  日期：{row['日期']}")
+            print(f"    签约套数：{int(row['签约套数'])} 套")
+            print(f"    签约面积：{row['签约面积']:.2f} m²")
+            print(f"    住宅签约套数：{int(row['住宅签约套数'])} 套")
+            print(f"    住宅签约面积：{row['住宅签约面积']:.2f} m²")
+
+    # --- 2. 月度汇总 ---
+    if not new_df_month.empty:
+        print()
+        print("-" * W)
+        print("  [ 新增 - 月度汇总 ]")
+        print("-" * W)
+        for _, row in new_df_month.iterrows():
+            print(f"  月份：{row['月份']}")
+            print(f"    网上签约套数：{int(row['网上签约套数'])} 套")
+            print(f"    网上签约面积：{row['网上签约面积(m2)']:.2f} m²")
+            print(f"    住宅签约套数：{int(row['住宅签约套数'])} 套")
+            print(f"    住宅签约面积：{row['住宅签约面积(m2)']:.2f} m²")
+
+    # --- 3. 经纪机构 ---
+    if not new_df_agency.empty:
+        print()
+        print("-" * W)
+        print(f"  [ 新增 - 经纪机构签约排行 ]（{len(new_df_agency)} 条）")
+        print("-" * W)
+        df_show = new_df_agency.sort_values('签约套数', ascending=False).head(10)
+        print(f"  {'排名':<6}{'经纪机构':<30}{'签约套数':>10}{'退房套数':>10}")
+        print(f"  {'-'*6}{'-'*30}{'-'*10}{'-'*10}")
+        for _, r in df_show.iterrows():
+            name = r['经纪机构']
+            if len(name) > 14:
+                name = name[:13] + "…"
+            print(f"  {int(r['序号']):<6}{name:<30}{int(r['签约套数']):>10}{int(r['退房套数']):>10}")
+
+    # --- 4. 区县分布 ---
+    if not new_df_district.empty:
+        print()
+        print("-" * W)
+        print(f"  [ 新增 - 区县签约分布 ]（{len(new_df_district)} 条）")
+        print("-" * W)
+        df_show = new_df_district.sort_values('签约套数', ascending=False)
+        print(f"  {'区县':<10}{'签约套数':>12}{'成交面积(m²)':>16}")
+        print(f"  {'-'*10}{'-'*12}{'-'*16}")
+        for _, r in df_show.iterrows():
+            print(f"  {r['区县']:<10}{int(r['签约套数']):>12}{r['成交面积']:>16.2f}")
+
+    # --- 5. 面积区间分布 ---
+    if not new_df_area.empty:
+        print()
+        print("-" * W)
+        print(f"  [ 新增 - 面积区间分布 ]（{len(new_df_area)} 条）")
+        print("-" * W)
+        print(f"  {'面积区间':<16}{'成交套数':>12}{'成交面积(m²)':>16}")
+        print(f"  {'-'*16}{'-'*12}{'-'*16}")
+        for _, r in new_df_area.iterrows():
+            print(f"  {r['面积区间']:<16}{int(r['成交套数']):>12}{r['成交面积']:>16.2f}")
+
+    print()
+    print("=" * W)
+    print()
 
 
 def main():
@@ -614,7 +711,7 @@ def main():
         logger.info("开始保存数据到CSV文件...")
 
         # 保存经纪机构数据
-        new_agency, skip_agency = save_to_csv(
+        new_agency, skip_agency, df_new_agency = save_to_csv(
             df_agency,
             config.AGENCY_CSV,
             ['年月', '经纪机构'],
@@ -622,7 +719,7 @@ def main():
         )
 
         # 保存区县数据
-        new_district, skip_district = save_to_csv(
+        new_district, skip_district, df_new_district = save_to_csv(
             df_district,
             config.DISTRICT_CSV,
             ['年月', '区县'],
@@ -630,7 +727,7 @@ def main():
         )
 
         # 保存面积数据
-        new_area, skip_area = save_to_csv(
+        new_area, skip_area, df_new_area = save_to_csv(
             df_area,
             config.AREA_CSV,
             ['年月', '面积区间'],
@@ -638,7 +735,7 @@ def main():
         )
 
         # 保存每日数据
-        new_daily, skip_daily = save_to_csv(
+        new_daily, skip_daily, df_new_daily = save_to_csv(
             df_daily,
             config.DAILY_CSV,
             ['日期'],
@@ -646,14 +743,14 @@ def main():
         )
 
         # 保存月度汇总数据
-        new_month, skip_month = save_to_csv(
+        new_month, skip_month, df_new_month = save_to_csv(
             df_month,
             config.MONTH_CSV,
             ['月份'],
             logger
         )
 
-        # 5. 输出统计信息
+        # 5. 输出统计信息（日志）
         logger.info("-" * 50)
         logger.info("数据抓取统计：")
         logger.info(f"  目标年月：{year_month}")
@@ -665,6 +762,12 @@ def main():
         logger.info("=" * 50)
         logger.info("数据抓取完成！")
         logger.info("=" * 50)
+
+        # 6. 展示新增数据
+        display_results(
+            year_month, df_new_daily, df_new_month,
+            df_new_agency, df_new_district, df_new_area
+        )
 
     except Exception as e:
         logger.error(f"程序执行失败：{e}")
