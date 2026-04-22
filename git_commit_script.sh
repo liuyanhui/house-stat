@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# 切换到工作目录
+cd /home/home-stat/house-stat
+
 # 固定提交信息
 COMMIT_MSG="append data from http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749"
 
