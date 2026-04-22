@@ -39,4 +39,5 @@ log/
 *.log
 
 # Claude Code
-.claude/
+.claude/settings.local.json
+.claude/memory/
