@@ -14,11 +14,20 @@ DATA_DIR = os.path.join(SCRIPT_DIR, "data")      # 数据文件目录
 LOG_DIR = os.path.join(SCRIPT_DIR, "log")        # 日志文件目录
 
 # CSV 文件路径（使用os.path.join跨平台兼容）
-AGENCY_CSV = os.path.join(DATA_DIR, "month_agency.csv")
-DISTRICT_CSV = os.path.join(DATA_DIR, "month_district.csv")
-AREA_CSV = os.path.join(DATA_DIR, "month_area.csv")
-DAILY_CSV = os.path.join(DATA_DIR, "daily.csv")  # 每日存量房网上签约数据
-MONTH_CSV = os.path.join(DATA_DIR, "month.csv")  # 月度汇总数据（网上签约套数、网上签约面积、住宅签约套数、住宅签约面积）
+# 二手房数据 (resale)
+RESALE_DAILY_CSV = os.path.join(DATA_DIR, "resale_daily.csv")  # 每日存量房网上签约数据
+RESALE_MONTHLY_CSV = os.path.join(DATA_DIR, "resale_monthly.csv")  # 月度汇总数据
+RESALE_5YEAR_CSV = os.path.join(DATA_DIR, "resale_5year.csv")  # 近五年存量房交易情况
+
+# 新房数据 (new)
+NEW_DAILY_CSV = os.path.join(DATA_DIR, "new_daily.csv")  # 每日商品房数据统计
+NEW_5YEAR_CSV = os.path.join(DATA_DIR, "new_5year.csv")  # 近五年新建商品房网签情况
+
+# 分类数据 (agency, district, area, price)
+AGENCY_CSV = os.path.join(DATA_DIR, "agency_monthly.csv")
+DISTRICT_CSV = os.path.join(DATA_DIR, "district_monthly.csv")
+AREA_CSV = os.path.join(DATA_DIR, "area_monthly.csv")
+PRICE_CSV = os.path.join(DATA_DIR, "price_monthly.csv")  # 按价格统计月度数据
 
 # 日志文件路径
 LOG_FILE = os.path.join(LOG_DIR, "house_stat.log")

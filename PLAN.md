@@ -50,9 +50,15 @@
 house-stat/
 ├── house_stat.py          # 主程序
 ├── config.py              # 配置文件
-├── month_agency.csv       # 经纪机构月度数据
-├── month_district.csv     # 区县月度数据
-├── month_area.csv         # 面积月度数据
+├── agency_monthly.csv     # 经纪机构月度数据
+├── district_monthly.csv   # 区县月度数据
+├── area_monthly.csv       # 面积月度数据
+├── price_monthly.csv      # 价格段月度数据
+├── resale_daily.csv       # 二手房日报
+├── resale_monthly.csv     # 二手房月报
+├── resale_5year.csv       # 二手房五年数据
+├── new_daily.csv          # 新房日报
+├── new_5year.csv          # 新房五年数据
 ├── house_stat.log         # 运行日志
 ├── PLAN.md                # 本计划文档
 └── README.md              # 使用说明
@@ -64,9 +70,9 @@ house-stat/
 ```python
 # 配置项
 BASE_URL = "http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749"
-AGENCY_CSV = "month_agency.csv"
-DISTRICT_CSV = "month_district.csv"
-AREA_CSV = "month_area.csv"
+AGENCY_CSV = "agency_monthly.csv"
+DISTRICT_CSV = "district_monthly.csv"
+AREA_CSV = "area_monthly.csv"
 LOG_FILE = "house_stat.log"
 ```
 
@@ -138,14 +144,14 @@ LOG_FILE = "house_stat.log"
 
 ## CSV 数据格式
 
-### month_agency.csv
+### agency_monthly.csv
 ```csv
 年月,序号,经纪机构,签约套数,退房套数
 2025-12,1,北京链家置地房地产经纪有限公司,8695,150
 2025-12,2,北京我爱我家房地产经纪有限公司,1926,58
 ```
 
-### month_district.csv
+### district_monthly.csv
 ```csv
 年月,区县,签约套数,成交面积
 2025-12,全市,19132,1659092.40
@@ -153,7 +159,7 @@ LOG_FILE = "house_stat.log"
 2025-12,朝阳,4520,407002.24
 ```
 
-### month_area.csv
+### area_monthly.csv
 ```csv
 年月,面积区间,成交套数,成交面积
 2025-12,60m²以下,5824,264050.14
@@ -281,3 +287,231 @@ python house_stat.py
 ---
 请确认此计划是否符合需求，或提出修改建议。
 确认后我将开始编写程序代码。
+
+---
+
+# 新增数据抓取实施计划 (2026-04-30)
+
+## 背景说明
+目标网页 `http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749` 新增了以下内容，需要扩展抓取程序：
+
+1. **经纪机构表格新增列**："发布套数"
+2. **新增表格4**：按价格统计 (`table_clf4`)
+3. **新增表格5**：近五年新建商品房网签情况 (`table_001`)
+4. **新增表格6**：近五年存量房交易情况 (`table_002`)
+
+## 实施方案
+
+### 1. 更新现有函数 - `parse_agency_data()`
+
+**变化**：在经纪机构数据中新增"发布套数"列
+
+**原CSV格式**：
+```csv
+年月,序号,经纪机构,签约套数,退房套数
+```
+
+**新CSV格式**：
+```csv
+年月,序号,经纪机构,发布套数,签约套数,退房套数
+```
+
+**代码改动**：
+```python
+# 在 parse_agency_data() 函数中
+# 原代码：
+data.append({
+    '年月': year_month,
+    '序号': int(seq_num),
+    '经纪机构': agency_name,
+    '签约套数': int(sign_count) if sign_count.isdigit() else 0,
+    '退房套数': int(refund_count) if refund_count.isdigit() else 0
+})
+
+# 新代码：
+data.append({
+    '年月': year_month,
+    '序号': int(seq_num),
+    '经纪机构': agency_name,
+    '发布套数': int(list_count) if list_count.isdigit() else 0,  # 新增
+    '签约套数': int(sign_count) if sign_count.isdigit() else 0,
+    '退房套数': int(refund_count) if refund_count.isdigit() else 0
+})
+```
+
+### 2. 新增函数 - `parse_price_data()`
+
+**功能**：解析按价格统计的数据
+
+**表格ID**：`table_clf4`
+
+**表格结构**（横向，需要转置）：
+```
+价格：     60万以下 | 60～90万 | 90～120万 | 120～150万 | 150～200万 | 200万以上
+发布套数：    0     |    0    |     0     |     0     |     0     |     0
+发布面积：  0.00   |   0.00  |    0.00   |    0.00   |    0.00   | 698334.42
+成交套数：  4194   |  1950   |   2703    |   2375    |   3312    |   7288
+成交面积：231788.06|136185.00|201587.31 |181691.88 |270811.81 |818182.10
+```
+
+**输出CSV格式** (`price_monthly.csv`)：
+```csv
+年月,价格区间,发布套数,发布面积,成交套数,成交面积
+2026-03,60万以下,0,0.00,4194,231788.06
+2026-03,60～90万,0,0.00,1950,136185.00
+2026-03,90～120万,0,0.00,2703,201587.31
+2026-03,120～150万,0,0.00,2375,181691.88
+2026-03,150～200万,0,0.00,3312,270811.81
+2026-03,200万以上,0,698334.42,7288,818182.10
+```
+
+**关键代码**：
+```python
+def parse_price_data(soup, year_month, logger):
+    """解析按价格统计的数据"""
+    # 查找表格 table_clf4
+    # 转置横向数据为竖向
+    # 返回 DataFrame
+```
+
+### 3. 新增函数 - `parse_five_year_commercial()`
+
+**功能**：解析近五年新建商品房网签情况
+
+**表格ID**：`table_001`
+
+**表格结构**：
+```
+标题：2020-2024年我市新建商品房网签情况
+单位：万套、万平方米
+
+时间    | 住宅套数 | 住宅面积 | 非住宅面积
+2020年  |   6.81   | 765.47   | 389.92
+2021年  |   9.07   | 1036.48  | 430.44
+2022年  |   6.81   | 784.14   | 368.02
+2023年  |   6.56   | 748.69   | 434.01
+2024年  |   5.11   | 600.9    | 423.88
+```
+
+**输出CSV格式** (`new_5year.csv`)：
+```csv
+年份,住宅套数万,住宅面积万m2,非住宅面积万m2,数据更新日期
+2020,6.81,765.47,389.92,2026-04-30
+2021,9.07,1036.48,430.44,2026-04-30
+2022,6.81,784.14,368.02,2026-04-30
+2023,6.56,748.69,434.01,2026-04-30
+2024,5.11,600.9,423.88,2026-04-30
+```
+
+**关键代码**：
+```python
+def parse_five_year_commercial(soup, logger):
+    """解析近五年新建商品房网签情况"""
+    # 查找表格 table_001
+    # 提取年度数据
+    # 添加数据更新日期
+    # 返回 DataFrame
+```
+
+### 4. 新增函数 - `parse_five_year_existing()`
+
+**功能**：解析近五年存量房交易情况
+
+**表格ID**：`table_002`
+
+**表格结构**：
+```
+标题：2020-2024年我市存量房交易情况
+单位：万套、万平方米
+
+时间    | 住宅套数 | 住宅面积 | 非住宅面积
+2020年  |  16.46   | 1478.8   | 95.7
+2021年  |  19.11   | 1730.4   | 113.7
+2022年  |  14.09   | 1285.0   | 96.3
+2023年  |  15.32   | 1375.80  | 125.20
+2024年  |  17.32   | 1558.3   | 110
+```
+
+**输出CSV格式** (`resale_5year.csv`)：
+```csv
+年份,住宅套数万,住宅面积万m2,非住宅面积万m2,数据更新日期
+2020,16.46,1478.8,95.7,2026-04-30
+2021,19.11,1730.4,113.7,2026-04-30
+2022,14.09,1285.0,96.3,2026-04-30
+2023,15.32,1375.80,125.20,2026-04-30
+2024,17.32,1558.3,110,2026-04-30
+```
+
+**关键代码**：
+```python
+def parse_five_year_existing(soup, logger):
+    """解析近五年存量房交易情况"""
+    # 查找表格 table_002
+    # 提取年度数据
+    # 添加数据更新日期
+    # 返回 DataFrame
+```
+
+### 5. 更新配置文件 `config.py`
+
+**新增配置项**：
+```python
+# 价格月度数据
+PRICE_CSV = os.path.join(DATA_DIR, "price_monthly.csv")
+
+# 五年统计数据
+NEW_5YEAR_CSV = os.path.join(DATA_DIR, "new_5year.csv")
+RESALE_5YEAR_CSV = os.path.join(DATA_DIR, "resale_5year.csv")
+```
+
+### 6. 更新主程序 `main()`
+
+**新增解析调用**：
+```python
+# 在 main() 函数中添加
+df_price = parse_price_data(soup, year_month, logger)
+df_commercial = parse_five_year_commercial(soup, logger)
+df_existing = parse_five_year_existing(soup, logger)
+
+# 保存新数据
+save_to_csv(df_price, config.PRICE_CSV, ['年月', '价格区间'], logger)
+save_to_csv(df_commercial, config.NEW_5YEAR_CSV, ['年份'], logger)
+save_to_csv(df_existing, config.RESALE_5YEAR_CSV, ['年份'], logger)
+```
+
+### 7. 更新显示函数 `display_results()`
+
+**新增显示内容**：
+```python
+# --- 6. 价格区间分布 ---
+if not new_df_price.empty:
+    print("-" * W)
+    print(f"  [ 新增 - 价格区间分布 ]（{len(new_df_price)} 条）")
+    # ... 显示数据
+
+# --- 7. 五年新建商品房统计 ---
+if not new_df_commercial.empty:
+    # ... 显示数据
+
+# --- 8. 五年存量房统计 ---
+if not new_df_existing.empty:
+    # ... 显示数据
+```
+
+## 实施顺序
+
+1. ✅ 更新 `config.py` - 添加新的CSV路径配置
+2. ✅ 更新 `parse_agency_data()` - 添加"发布套数"列
+3. ✅ 新增 `parse_price_data()` - 解析价格统计
+4. ✅ 新增 `parse_five_year_commercial()` - 解析五年新建商品房
+5. ✅ 新增 `parse_five_year_existing()` - 解析五年存量房
+6. ✅ 更新 `main()` - 集成新的解析和保存逻辑
+7. ✅ 更新 `display_results()` - 显示新增数据
+8. ✅ 测试运行 - 验证所有新功能正常工作
+
+## 注意事项
+
+1. **数据兼容性**：现有的 `agency_monthly.csv` 文件需要添加"发布套数"列，建议重新生成或手动添加列
+2. **五年数据去重**：由于五年数据每年更新一次，使用"年份"作为唯一键，数据更新时会覆盖旧数据
+3. **价格数据转置**：与区县和面积数据一样，需要从横向转换为竖向格式
+4. **数据更新日期**：五年统计数据需要添加"数据更新日期"字段，以便追踪数据时效性
