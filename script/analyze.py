@@ -24,19 +24,19 @@ ENC = 'utf-8-sig'
 
 
 def load_data(data_dir):
-    daily_path = os.path.join(data_dir, 'daily.csv')
-    month_path = os.path.join(data_dir, 'month.csv')
-    district_path = os.path.join(data_dir, 'month_district.csv')
-    area_path = os.path.join(data_dir, 'month_area.csv')
+    daily_path = os.path.join(data_dir, 'resale_daily.csv')
+    month_path = os.path.join(data_dir, 'resale_monthly.csv')
+    district_path = os.path.join(data_dir, 'district_monthly.csv')
+    area_path = os.path.join(data_dir, 'area_monthly.csv')
 
     # 检查核心文件
     if not os.path.exists(daily_path):
         print(f'错误: 未找到核心数据文件 {daily_path}', file=sys.stderr)
-        print('  daily.csv 包含每日签约数据，为必填文件。', file=sys.stderr)
+        print('  resale_daily.csv 包含每日签约数据，为必填文件。', file=sys.stderr)
         sys.exit(1)
     if not os.path.exists(month_path):
         print(f'错误: 未找到核心数据文件 {month_path}', file=sys.stderr)
-        print('  month.csv 包含月度汇总数据，为必填文件。', file=sys.stderr)
+        print('  resale_monthly.csv 包含月度汇总数据，为必填文件。', file=sys.stderr)
         sys.exit(1)
 
     # 检查可选文件
