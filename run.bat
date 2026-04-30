@@ -21,7 +21,7 @@ echo.
 echo Running scraper...
 echo.
 
-python house_stat.py
+python main.py
 
 echo.
 echo ========================================
