@@ -243,6 +243,7 @@ def parse_commercial_data(soup, logger):
                     parent = element.find_parent('table')
                     if parent:
                         rows = parent.find_all('tr')
+                        last_label_type = None  # 追踪上一个标签类型
                         for row in rows:
                             cols = row.find_all('td')
                             if len(cols) >= 2:
@@ -255,12 +256,26 @@ def parse_commercial_data(soup, logger):
                                     data['可售期房面积'] = safe_float(value)
                                 elif '其中' in label and '住宅套数' in label:
                                     data['可售期房住宅套数'] = safe_int(value)
+                                    last_label_type = 'housing'
                                 elif '商业单元' in label:
                                     data['可售期房商业单元'] = safe_int(value)
+                                    last_label_type = 'commercial'
                                 elif '办公单元' in label:
                                     data['可售期房办公单元'] = safe_int(value)
+                                    last_label_type = 'office'
                                 elif '车位个数' in label:
                                     data['可售期房车位个数'] = safe_int(value)
+                                    last_label_type = 'parking'
+                                # 根据上一个标签类型匹配面积字段
+                                elif '面积' in label or 'M2' in label:
+                                    if last_label_type == 'housing':
+                                        data['可售期房住宅面积'] = safe_float(value)
+                                    elif last_label_type == 'commercial':
+                                        data['可售期房商业面积'] = safe_float(value)
+                                    elif last_label_type == 'office':
+                                        data['可售期房办公面积'] = safe_float(value)
+                                    elif last_label_type == 'parking':
+                                        data['可售期房车位面积'] = safe_float(value)
                     break
         except Exception as e:
             logger.warning(f"解析可售期房统计失败：{e}")
