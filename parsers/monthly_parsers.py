@@ -148,10 +148,31 @@ def parse_district_data(soup, year_month, logger):
         return pd.DataFrame()
 
 
+def _find_row_by_label(rows, *labels):
+    """按首列文本定位数据行，返回去掉首列后的单元格文本列表。
+
+    labels 为可匹配的关键字（任一命中即可），匹配前会去除空白。
+    解决写死位置索引在页面改版后抓错行的问题（见 parse_area_data 的历史 bug）。
+    """
+    for tr in rows:
+        cells = tr.find_all('td')
+        if not cells:
+            continue
+        head = cells[0].get_text(strip=True).replace('　', '').replace(' ', '')
+        for lab in labels:
+            if lab.replace(' ', '') in head:
+                return [td.get_text(strip=True) for td in cells[1:]]
+    return None
+
+
 def parse_area_data(soup, year_month, logger):
     """
     解析按面积统计的数据
     表格ID: table_clf3
+
+    注意：页面改版后该表为 5 行结构（表头 / 发布套数 / 发布面积 / 成交套数 / 成交面积）。
+    本函数按表头文本定位"成交套数""成交面积"行，避免位置索引导致的误抓
+    （旧版本曾把"发布套数"误存为"成交套数"）。
     """
     logger.info("开始解析面积数据...")
 
@@ -161,49 +182,43 @@ def parse_area_data(soup, year_month, logger):
             logger.error("未找到面积数据表格")
             return pd.DataFrame()
 
-        inner_table = outer_table.find('table', bordercolor=lambda x: x and '#4a9ee0' in x)
+        # bordercolor 选择器在页面改版后已失效，统一走内层首个 table 并校验
+        inner_table = outer_table.find('table')
         if not inner_table:
-            inner_table = outer_table.find('table')
-            if not inner_table:
-                logger.error("未找到内层面积数据表格")
-                return pd.DataFrame()
+            logger.error("未找到内层面积数据表格")
+            return pd.DataFrame()
 
         rows = inner_table.find_all('tr')
-
         if len(rows) < 3:
             logger.error(f"面积表格行数不足，期望至少3行，实际{len(rows)}行")
             return pd.DataFrame()
 
-        area_header_row = rows[0].find_all('td')
-        area_ranges = [td.get_text(strip=True) for td in area_header_row[1:]]
+        # 按表头文本定位行，禁用位置索引
+        area_ranges = _find_row_by_label(rows, '面积')
+        deal_counts = _find_row_by_label(rows, '成交套数')
+        deal_areas = _find_row_by_label(rows, '成交面积')
 
-        count_row = rows[1].find_all('td')
-        counts = [td.get_text(strip=True) for td in count_row[1:]]
-
-        area_row = rows[2].find_all('td')
-        areas = [td.get_text(strip=True) for td in area_row[1:]]
+        if not area_ranges or not deal_counts or not deal_areas:
+            logger.error(
+                f"面积表格行定位失败（区间={bool(area_ranges)}, "
+                f"成交套数={bool(deal_counts)}, 成交面积={bool(deal_areas)}），"
+                f"实际行数={len(rows)}"
+            )
+            return pd.DataFrame()
 
         logger.info(f"面积数据：找到{len(area_ranges)}个区间")
 
         data = []
         for i, area_range in enumerate(area_ranges):
-            if i < len(counts) and i < len(areas):
-                try:
-                    count_str = counts[i].replace(',', '').strip()
-                    area_str = areas[i].replace(',', '').strip()
-
-                    count_val = float(count_str) if count_str else -1
-                    area_val = float(area_str) if area_str else -1
-
-                    data.append({
-                        '年月': year_month,
-                        '面积区间': area_range,
-                        '成交套数': int(count_val) if count_val == int(count_val) else count_val,
-                        '成交面积': area_val
-                    })
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"跳过异常数据：面积区间={area_range}, 错误={e}")
-                    continue
+            if i < len(deal_counts) and i < len(deal_areas):
+                count_val = safe_int(deal_counts[i]) if deal_counts[i] else -1
+                area_val = safe_float(deal_areas[i]) if deal_areas[i] else -1
+                data.append({
+                    '年月': year_month,
+                    '面积区间': area_range,
+                    '成交套数': count_val,
+                    '成交面积': area_val,
+                })
 
         df = pd.DataFrame(data)
         logger.info(f"成功解析面积数据 {len(df)} 条")

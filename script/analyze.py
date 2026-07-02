@@ -11,6 +11,7 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import chinese_calendar as cc
 
 # 确保中文输出不乱码
 try:
@@ -77,20 +78,36 @@ def load_data(data_dir):
 
 
 def classify_day_type(df):
-    """从数据本身推断假期：工作日(Mon-Fri)成交量低于当月工作日均值15%的视为假期"""
+    """按法定日历判定工作日/周末/假期。
+
+    使用 chinese_calendar 的 is_workday/is_holiday：
+    - 调休上班的周末 → 工作日
+    - 法定假日（含工作日上的假日）→ 假期
+    - 普通周末 → 周末
+    库未覆盖的日期回退纯 weekday 判定，并一次性 stderr 告警。
+    旧实现用"低于当月工作日均值 15% 判假期"是循环逻辑（假期本身拉低均值、
+    阈值漂移），会误判节后正常工作日，已弃用。
+    """
     df = df.copy()
-    df['day_type'] = np.where(df['weekday'] >= 5, '周末', '工作日')
 
-    for ym, grp in df.groupby('year_month'):
-        workdays = grp[grp['day_type'] == '工作日']
-        if len(workdays) == 0:
-            continue
-        threshold = workdays['住宅签约套数'].mean() * 0.15
-        if threshold < 5:
-            threshold = 5
-        holiday_mask = (grp['day_type'] == '工作日') & (grp['住宅签约套数'] <= threshold)
-        df.loc[holiday_mask[holiday_mask].index, 'day_type'] = '假期'
+    out_of_range_warned = {'flag': False}
 
+    def classify(d):
+        try:
+            if cc.is_workday(d):
+                return '工作日'
+            if cc.is_holiday(d):
+                return '假期'
+            return '周末'
+        except NotImplementedError:
+            # 库未覆盖的日期（通常是未来日期）：回退纯 weekday
+            if not out_of_range_warned['flag']:
+                out_of_range_warned['flag'] = True
+                print(f'警告: chinese_calendar 未覆盖日期 {d.date()} 及之后，'
+                      f'回退为纯 weekday 判定（无假期识别）', file=sys.stderr)
+            return '周末' if d.weekday() >= 5 else '工作日'
+
+    df['day_type'] = df['日期'].apply(classify)
     return df
 
 
@@ -423,11 +440,16 @@ def section_summary(daily, month, cur_year, prev_year, df_classified):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='北京二手住宅成交量分析报告',
+        description='北京二手住宅成交量分析',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='示例:\n'
-               '  python script/analyze.py\n'
+               '  python script/analyze.py --report     # 生成趋势报告(Markdown+PNG)\n'
+               '  python script/analyze.py              # 控制台文本分析\n'
                '  python script/analyze.py --data-dir /path/to/data',
+    )
+    parser.add_argument(
+        '--report', action='store_true',
+        help='生成趋势报告 (report/trend_report.md + PNG 图表)',
     )
     parser.add_argument(
         '--data-dir', default=DEFAULT_DATA_DIR,
@@ -436,9 +458,28 @@ def parse_args():
     return parser.parse_args()
 
 
+def run_report(data_dir):
+    """生成趋势报告（Markdown + PNG）。"""
+    # BASE_DIR 已是项目根目录；加入 sys.path 以便导入 config / analysis 包
+    if BASE_DIR not in sys.path:
+        sys.path.insert(0, BASE_DIR)
+    import config
+    if os.path.isdir(data_dir):
+        config.DATA_DIR = os.path.abspath(data_dir)
+    from analysis import report as report_mod
+    out = report_mod.generate()
+    print(f'趋势报告已生成: {out}')
+    print(f'图表目录: {config.REPORT_DIR}')
+    return out
+
+
 def main():
     args = parse_args()
     data_dir = args.data_dir
+
+    if args.report:
+        run_report(data_dir)
+        return
 
     if not os.path.isdir(data_dir):
         print(f'错误: 数据目录不存在: {data_dir}', file=sys.stderr)

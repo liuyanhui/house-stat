@@ -3,27 +3,24 @@ cd /d "%~dp0"
 
 echo.
 echo ========================================
-echo   Beijing Housing Data Scraper
+echo   Beijing Resale Trend Report
 echo ========================================
 echo.
 
-echo Checking Python...
-py -3.13 --version
+echo Generating trend report (Markdown + PNG)...
+echo.
+
+py -3.13 script/analyze.py --report
 if errorlevel 1 (
     echo.
-    echo ERROR: Python 3.13 not found via "py -3.13".
-    echo Install Python 3.13 or adjust the launcher in run.bat.
-    echo.
+    echo ERROR: report generation failed.
     pause
     exit /b 1
 )
 
 echo.
-echo Running scraper...
-echo.
-
-py -3.13 main.py
-
+echo Report: report\trend_report.md
+echo Charts: report\*.png
 echo.
 echo ========================================
 echo Done! Press any key to exit...

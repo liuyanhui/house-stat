@@ -13,7 +13,8 @@ from utils import (
     save_to_csv,
     display_results,
     extend_csv_columns,
-    extend_agency_csv
+    extend_agency_csv,
+    validate_integrity
 )
 from parsers import (
     extract_data_month,
@@ -124,9 +125,6 @@ def main():
         logger.info(f"  月度汇总：抓取 {len(df_month)} 条，新增 {new_month} 条，已存在 {skip_month} 条")
         logger.info(f"  五年新建商品房：抓取 {len(df_commercial)} 条，新增 {new_commercial} 条，已存在 {skip_commercial} 条")
         logger.info(f"  五年存量房：抓取 {len(df_existing)} 条，新增 {new_existing} 条，已存在 {skip_existing} 条")
-        logger.info("=" * 50)
-        logger.info("数据抓取完成！")
-        logger.info("=" * 50)
 
         # 6. 展示新增数据
         display_results(
@@ -136,6 +134,23 @@ def main():
             df_new_commercial_daily
         )
 
+        # 7. 数据完整性校验（面积段/价格段加总 vs 全市，阈值 5%）
+        # 不一致则非零退出，让定时任务可见，避免静默写入脏数据
+        logger.info("-" * 50)
+        logger.info("数据完整性校验...")
+        ok, issues = validate_integrity(logger=logger)
+        if ok:
+            logger.info("完整性校验通过：面积段/价格段加总与全市一致")
+        else:
+            logger.error(f"完整性校验发现 {len(issues)} 处不一致，数据可能有问题，详见上方日志")
+            raise SystemExit(1)
+
+        logger.info("=" * 50)
+        logger.info("数据抓取完成！")
+        logger.info("=" * 50)
+
+    except SystemExit:
+        raise
     except Exception as e:
         logger.error(f"程序执行失败：{e}")
         raise

@@ -12,6 +12,7 @@ BASE_URL = "http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749"
 # 目录配置（使用绝对路径）
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")      # 数据文件目录
 LOG_DIR = os.path.join(SCRIPT_DIR, "log")        # 日志文件目录
+REPORT_DIR = os.path.join(SCRIPT_DIR, "report")  # 趋势分析报告输出目录
 
 # CSV 文件路径（使用os.path.join跨平台兼容）
 # 二手房数据 (resale)
