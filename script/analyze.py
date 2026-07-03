@@ -467,8 +467,12 @@ def run_report(data_dir):
     if os.path.isdir(data_dir):
         config.DATA_DIR = os.path.abspath(data_dir)
     from analysis import report as report_mod
+    from analysis import html_render
     out = report_mod.generate()
+    html_path = os.path.join(config.REPORT_DIR, 'trend_report.html')
+    html_render.render_file(out, html_path)
     print(f'趋势报告已生成: {out}')
+    print(f'HTML 报告: {html_path}')
     print(f'图表目录: {config.REPORT_DIR}')
     return out
 

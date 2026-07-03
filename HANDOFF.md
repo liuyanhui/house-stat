@@ -17,7 +17,7 @@
 cd house-stat
 # 装依赖（见下方"环境"）
 pip install -r requirements.txt
-# 生成趋势报告（Markdown + PNG，输出到 report/）
+# 生成趋势报告（Markdown + HTML + PNG，输出到 report/）
 python script/analyze.py --report
 # 抓取最新数据（含完整性校验门，失败会非零退出）
 python main.py
@@ -25,7 +25,7 @@ python main.py
 python script/validate.py
 ```
 
-报告产物：`report/trend_report.md` + `report/*.png`（当前 10 张图）。
+报告产物：`report/trend_report.md`（文本）+ `report/trend_report.html`（自包含，图片 base64 内嵌，浏览器直接开）+ `report/*.png`（10 张图）。md→html 转换器是 `analysis/html_render.py`，独立转换用 `script/gen_html.py`。
 
 ## 三、环境（重要）
 
@@ -46,10 +46,12 @@ analysis/                    趋势分析包（本次新增的核心）
   load.py                    加载各 CSV、清洗 -1、规范区县名、load_daily()
   metrics.py                 同比/环比、移动均值、套均面积、weekly_aggregate()、区域份额/排名
   plots.py                   全部图表 + 中文字体(Microsoft YaHei)
-  report.py                  组装 trend_report.md
-script/analyze.py            --report 生成趋势报告；无参数=原控制台文本分析
+  report.py                  组装 trend_report.md（md 生成链路，勿与 html_render 耦合）
+  html_render.py             Markdown→自包含 HTML 转换器（微信胶囊主题、GFM 表格、图片 base64 内嵌）
+script/analyze.py            --report 生成趋势报告（md+html+png）；无参数=原控制台文本分析
+script/gen_html.py           独立把 trend_report.md 转成 trend_report.html
 script/validate.py           独立校验
-report/                      趋势报告输出（trend_report.md + PNG，会进 git）
+report/                      趋势报告输出（trend_report.md + trend_report.html + PNG，会进 git）
 ```
 
 **复用约定**：`pct_change`/`normalize_district` 在 script/analyze.py；`safe_int/safe_float` 在 parsers/base_parser.py。

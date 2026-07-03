@@ -31,11 +31,13 @@ python main.py
 
 程序自动抓取数据并保存到 `data/` 目录，已存在的数据会自动跳过。抓取完成后自动运行数据完整性校验（面积/价格段加总 vs 全市），不一致则非零退出。
 
-**趋势分析报告**（Markdown + PNG 图表，写入 `report/`）：
+**趋势分析报告**（Markdown + HTML + PNG 图表，写入 `report/`）：
 
 ```bash
 python script/analyze.py --report
 ```
+
+产物：`report/trend_report.md`（文本）、`report/trend_report.html`（自包含，图片 base64 内嵌，浏览器直接打开）、`report/*.png`（10 张图）。也可单独把 md 转 html：`python script/gen_html.py`。
 
 **控制台文本分析**（原行为，保留）：
 
@@ -123,7 +125,8 @@ house-stat/
 
 | 文件 | 说明 |
 |------|------|
-| `analyze.py` | `--report`：生成趋势报告（Markdown + PNG，全市/各区/结构趋势）。无参数：原控制台文本分析（月度概览、周度、工作日/假期、区县/面积分布、同比环比） |
+| `analyze.py` | `--report`：生成趋势报告（Markdown + HTML + PNG，全市/周度/各区/结构趋势）。无参数：原控制台文本分析（月度概览、周度、工作日/假期、区县/面积分布、同比环比） |
+| `gen_html.py` | 把 `report/trend_report.md` 转成自包含 `trend_report.html`（图片 base64 内嵌） |
 | `validate.py` | 独立数据完整性校验：面积段/价格段成交加总 vs 全市（阈值 5%） |
 
 ### `analysis/` — 趋势分析包
@@ -131,9 +134,10 @@ house-stat/
 | 文件 | 说明 |
 |------|------|
 | `load.py` | 加载各 CSV，解析日期、清洗 -1、规范区县名 |
-| `metrics.py` | 趋势指标：同比/环比、N 月移动均值、套均面积、区域份额/排名、结构占比 |
-| `plots.py` | 8 张趋势图（matplotlib，中文字体）：全市趋势、季节性热力、套均面积、各区堆叠/份额/小图、面积段·价格段结构 |
+| `metrics.py` | 趋势指标：同比/环比、N 月移动均值、套均面积、周度聚合、区域份额/排名、结构占比 |
+| `plots.py` | 10 张趋势图（matplotlib，中文字体）：全市趋势、季节性热力、套均面积、周度成交/周度套均面积、各区堆叠/份额/小图、面积段成交量/占比 |
 | `report.py` | 组装 `report/trend_report.md`，嵌入图表，含数据说明与参考锚点 |
+| `html_render.py` | Markdown→自包含 HTML 转换器（微信胶囊主题、GFM 表格、图片 base64 内嵌） |
 
 ## 数据来源与可靠性
 
