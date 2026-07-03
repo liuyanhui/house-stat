@@ -13,6 +13,7 @@
 - `setup_logging`（来自 logging_setup）
 - `fetch_html`（来自 fetcher）
 - `save_to_csv`, `display_results`, `extend_csv_columns`, `extend_agency_csv`（来自 storage）
+- `validate_integrity`（来自 validate）
 
 ### `fetcher.py`
 
@@ -40,6 +41,14 @@
 | 函数 | 说明 |
 |------|------|
 | `ensure_directories()` | 确保 `data/` 和 `log/` 目录存在，不存在时自动创建。 |
+
+### `validate.py`
+
+数据完整性校验，是防止静默脏数据的防线。
+
+| 函数 | 说明 |
+|------|------|
+| `validate_integrity(data_dir=None, logger=None)` | 逐月校验 `area_monthly`/`price_monthly` 各段成交加总 ≈ `district_monthly` 全市（阈值 5%）。返回 `(ok, issues)`。`main.py` 抓取后调用，不一致 `sys.exit(1)`；`script/validate.py` 与 `analysis` 合并历史时复用。 |
 
 ### `logging_setup.py`
 

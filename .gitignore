@@ -37,6 +37,7 @@ env/
 # Project specific
 log/
 *.log
+report/
 
 # Claude Code
 .claude/settings.local.json

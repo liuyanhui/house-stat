@@ -37,7 +37,7 @@ python main.py
 python script/analyze.py --report
 ```
 
-产物：`report/trend_report.md`（文本）、`report/trend_report.html`（自包含，图片 base64 内嵌，浏览器直接打开）、`report/*.png`（10 张图）。也可单独把 md 转 html：`python script/gen_html.py`。
+产物：`report/trend_report.md`（文本）、`report/trend_report.html`（自包含，图片 base64 内嵌，浏览器直接打开）、`report/*.png`（10 张图）。也可单独把 md 转 html：`python script/gen_html.py`。`report/` 为代码生成的衍生物，**已加入 .gitignore**，每次运行重新生成。
 
 **控制台文本分析**（原行为，保留）：
 
@@ -66,7 +66,7 @@ house-stat/
 ├── git-push.bat         # Git 推送辅助脚本
 ├── data/                # 数据输出目录（详见下方）
 ├── log/                 # 日志目录
-├── report/              # 趋势报告输出（trend_report.md + PNG 图表）
+├── report/              # 趋势报告输出（md + html + PNG，代码生成，已 gitignore）
 ├── parsers/             # 数据解析模块
 ├── utils/               # 工具模块（含数据校验 validate.py）
 ├── analysis/            # 趋势分析包（加载/指标/图表/报告）
