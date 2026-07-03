@@ -30,7 +30,7 @@ def main():
 
     out = ai_digest.render_file(args.out)
     print(f'AI 分析输入已导出: {out}')
-    print('整篇复制粘贴给 LLM → 得到客观视角分析（不含价格、不含预测）。')
+    print('整篇复制粘贴给 LLM → 得客观事实 + 资深视角预判（不含价格；预判为分析师判断、非事实）。')
 
 
 if __name__ == '__main__':
