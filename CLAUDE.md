@@ -12,6 +12,7 @@ python main.py                      # 抓取最新数据（含完整性校验门
 python script/analyze.py --report   # 生成趋势报告（report/ 下 md + html + png）
 python script/validate.py           # 独立数据完整性校验
 python script/gen_html.py           # 单独把 trend_report.md 转成自包含 html
+python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（report/ai_digest.md，手动喂 LLM）
 ```
 
 > **Python 版本**：依赖在 Python 3.13 下完整可用（matplotlib 等）。原开发机因全局 PYTHONPATH 把 3.13 包装进 3.14 导致 matplotlib 崩，故 `run.bat`/`report.bat` 默认 `py -3.13`。换机器装好 requirements 即可，matplotlib 报错就建 venv。
@@ -30,8 +31,8 @@ script/analyze.py --report → analysis.load → metrics → plots(PNG) → repo
 | `data/` | 官方自爬 CSV（可靠基准，逐月累积） | ✓ |
 | `parsers/` | HTML→DataFrame 解析器 | ✓ |
 | `utils/` | 抓取/存储/校验/日志/目录 | ✓ |
-| `analysis/` | 趋势分析包（load/metrics/plots/report/html_render） | ✓ |
-| `script/` | 入口脚本（analyze/gen_html/validate） | ✓ |
+| `analysis/` | 趋势分析包（load/metrics/plots/report/html_render/ai_digest） | ✓ |
+| `script/` | 入口脚本（analyze/gen_html/gen_ai_digest/validate） | ✓ |
 | `report/` | 报告产物（md+html+png，代码生成） | ✗ 已忽略，每次重生 |
 | `log/` | 运行日志 | ✗ 已忽略 |
 

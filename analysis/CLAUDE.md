@@ -30,6 +30,11 @@ Markdown→自包含 HTML 转换器（零依赖，移植自 refined-stock `gen-h
 - 扩展了 GFM 表格（带样式、横向滚动）与图片 base64 内嵌（单文件自包含）。
 - 微信胶囊主题集中在 `THEME` 常量（accent `#009874`、中文字体栈），用 `<style>` 块。
 
+### `ai_digest.py`
+AI 分析输入导出（客观 digest + 可粘贴 prompt）。
+- `build_prompt()` / `render_file(out_path)`：从 load/metrics 算客观事实（全市月度同比/环比/MA12、套均面积、周度、区域份额/排名、面积段占比、年度+H1 锚点），**排除价格**，拼成单文件 `report/ai_digest.md`，整篇粘贴给 LLM。
+- 原则：代码拥有数字、AI 只拥有叙述；硬规则约束（只引 digest 数字、薄数据 hedge、不预测、不谈价格、区分季节性）。客观视角、手动喂、不进流程。
+
 ## 约定
 
 - 数据均来自官方自爬，口径一致。第三方历史未纳入主序列（见 `HANDOFF.md`）。

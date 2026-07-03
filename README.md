@@ -51,6 +51,12 @@ python script/analyze.py
 python script/validate.py
 ```
 
+**AI 客观分析输入导出**（手动喂 LLM）：
+
+```bash
+python script/gen_ai_digest.py   # 产 report/ai_digest.md，整篇粘贴给 LLM 得客观视角叙述
+```
+
 > ⚠️ **Python 版本**：本项目依赖在 **Python 3.13** 下完整可用（`requests/bs4/pandas/chinese_calendar/matplotlib`）。请用 `py -3.13` 运行。`run.bat` / `report.bat` 已默认使用 `py -3.13`。若环境用默认 `python`（3.14）且通过 `PYTHONPATH` 共享 3.13 的包，`matplotlib` 的编译扩展会因版本不匹配而导入失败——故统一用 3.13。
 
 ## 目录结构

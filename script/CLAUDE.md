@@ -31,3 +31,7 @@ python script/gen_html.py --md in.md --out out.html
 ### `validate.py`
 
 独立数据完整性校验：逐月校验 `area_monthly`/`price_monthly` 各段成交加总 ≈ `district_monthly` 全市（阈值 5%），不一致非零退出。`main.py` 抓取后也会自动调用同一 `utils.validate_integrity`。
+
+### `gen_ai_digest.py`
+
+导出 AI 客观分析输入：从数据算客观事实 digest + 可粘贴 prompt，写 `report/ai_digest.md`（不含价格、不含预测）。整篇复制粘贴给 LLM 即得客观视角叙述。**手动运行、不进自动化流程。**
