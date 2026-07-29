@@ -10,7 +10,10 @@ echo.
 echo Generating trend report (Markdown + PNG)...
 echo.
 
-py -3.13 script/analyze.py --report
+rem Python 3.14 has native cp314 wheels; clear PYTHONPATH so the global
+rem Python313 site-packages does not shadow them (cp313 numpy breaks 3.14).
+set "PYTHONPATH="
+py -3.14 script/analyze.py --report
 if errorlevel 1 (
     echo.
     echo ERROR: report generation failed.

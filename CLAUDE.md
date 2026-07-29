@@ -15,7 +15,7 @@ python script/gen_html.py           # 单独把 trend_report.md 转成自包含 
 python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（report/ai_digest.md，手动喂 LLM）
 ```
 
-> **Python 版本**：依赖在 Python 3.13 下完整可用（matplotlib 等）。原开发机因全局 PYTHONPATH 把 3.13 包装进 3.14 导致 matplotlib 崩，故 `run.bat`/`report.bat` 默认 `py -3.13`。换机器装好 requirements 即可，matplotlib 报错就建 venv。
+> **Python 版本**：默认用 **Python 3.14**（`py -3.14`），它带原生 cp314 wheel（numpy/pandas/matplotlib/PIL/chinese_calendar 等）。关键陷阱：本机全局 `PYTHONPATH` 指向 `D:\liuyh\software\Python\Python313\Lib\site-packages`，会排在 3.14 `sys.path` 最前，用 cp313 的 numpy 遮蔽 3.14 原生包导致 import 崩。**故 `run.bat`/`report.bat` 在调用前都 `set "PYTHONPATH="` 清空**。直接跑脚本同理：`PYTHONPATH= py -3.14 script/analyze.py --report`。换干净机器（无该 PYTHONPATH）直接 `py -3.14` 即可；matplotlib/numpy 报错先检查 PYTHONPATH 是否被污染，再考虑建 venv。
 
 ## 数据流
 

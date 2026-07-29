@@ -8,11 +8,11 @@ echo ========================================
 echo.
 
 echo Checking Python...
-py -3.13 --version
+py -3.14 --version
 if errorlevel 1 (
     echo.
-    echo ERROR: Python 3.13 not found via "py -3.13".
-    echo Install Python 3.13 or adjust the launcher in run.bat.
+    echo ERROR: Python 3.14 not found via "py -3.14".
+    echo Install Python 3.14 or adjust the launcher in run.bat.
     echo.
     pause
     exit /b 1
@@ -22,7 +22,10 @@ echo.
 echo Running scraper...
 echo.
 
-py -3.13 main.py
+rem Python 3.14 has native cp314 wheels; clear PYTHONPATH so the global
+rem Python313 site-packages does not shadow them (cp313 numpy breaks 3.14).
+set "PYTHONPATH="
+py -3.14 main.py
 
 echo.
 echo ========================================
