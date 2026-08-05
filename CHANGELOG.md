@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-02
+
+### Added
+- 趋势分析包 `analysis/`（load/metrics/plots/report/html_render）：全市/周度/各区/市场结构趋势，8 张 matplotlib 图（中文字体）
+- `script/analyze.py --report`：生成趋势报告（Markdown + HTML + PNG，写入 `report/`）
+- `script/gen_html.py`：把 `trend_report.md` 转成自包含 HTML（图片 base64 内嵌）
+- 数据完整性校验门 `utils/validate.py` + `script/validate.py`：面积段/价格段加总 vs 全市（阈值 5%），接入 main.py，不一致非零退出
+- 节假日判定改用 `chinese_calendar` 法定日历（替代旧的"低于工作日均值 15%"循环逻辑）
+
+### Fixed
+- 面积段解析 bug：北京住建委 2026-04~05 把面积表从 3 行（成交）改版成 5 行（发布+成交），旧 `parse_area_data` 写死 `rows[1]` 误把"发布套数"当"成交套数"；改为按表头文本定位行（`_find_row_by_label`）
+
 ## [2.0.0] - 2026-04-30
 
 ### Added

@@ -57,7 +57,7 @@ python script/validate.py
 python script/gen_ai_digest.py   # 产 report/ai_digest.md，整篇粘贴给 LLM 得客观视角叙述
 ```
 
-> ⚠️ **Python 版本**：本项目依赖在 **Python 3.13** 下完整可用（`requests/bs4/pandas/chinese_calendar/matplotlib`）。请用 `py -3.13` 运行。`run.bat` / `report.bat` 已默认使用 `py -3.13`。若环境用默认 `python`（3.14）且通过 `PYTHONPATH` 共享 3.13 的包，`matplotlib` 的编译扩展会因版本不匹配而导入失败——故统一用 3.13。
+> ⚠️ **Python 版本**：默认用 **Python 3.14**（`py -3.14`），它带原生 cp314 wheel（numpy/pandas/matplotlib/PIL/chinese_calendar 等）。关键陷阱：本机全局 `PYTHONPATH` 指向 Python313 的 site-packages，会排在 3.14 `sys.path` 最前，用 cp313 的 numpy 遮蔽 3.14 原生包导致 import 崩。**故 `run.bat`/`report.bat` 在调用前都 `set "PYTHONPATH="` 清空**。直接跑脚本同理：`PYTHONPATH= py -3.14 script/analyze.py --report`。换干净机器（无该 PYTHONPATH）直接 `py -3.14` 即可。
 
 ## 目录结构
 
@@ -66,8 +66,8 @@ house-stat/
 ├── main.py              # 主程序入口，编排抓取、解析、保存、校验流程
 ├── config.py            # 配置文件：URL、文件路径、重试参数等
 ├── requirements.txt     # Python 依赖
-├── run.bat              # Windows 抓取一键运行（py -3.13）
-├── report.bat           # Windows 趋势报告一键生成（py -3.13）
+├── run.bat              # Windows 抓取一键运行（py -3.14）
+├── report.bat           # Windows 趋势报告一键生成（py -3.14）
 ├── git_commit_script.sh # Git 提交辅助脚本
 ├── git-push.bat         # Git 推送辅助脚本
 ├── data/                # 数据输出目录（详见下方）
