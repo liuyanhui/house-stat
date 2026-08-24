@@ -11,6 +11,7 @@ BASE_URL = "http://bjjs.zjw.beijing.gov.cn/eportal/ui?pageId=307749"
 
 # 目录配置（使用绝对路径）
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")      # 数据文件目录
+RAW_DIR = os.path.join(DATA_DIR, "raw")          # 原始 HTML 存档（页面只显示当天/当月，错过无法回补）
 LOG_DIR = os.path.join(SCRIPT_DIR, "log")        # 日志文件目录
 REPORT_DIR = os.path.join(SCRIPT_DIR, "report")  # 趋势分析报告输出目录
 
@@ -34,7 +35,7 @@ PRICE_CSV = os.path.join(DATA_DIR, "price_monthly.csv")  # 按价格统计月度
 LOG_FILE = os.path.join(LOG_DIR, "house_stat.log")
 
 # 需要创建的目录列表
-DIRECTORIES = [DATA_DIR, LOG_DIR]
+DIRECTORIES = [DATA_DIR, RAW_DIR, LOG_DIR]
 
 # HTTP 请求配置
 HEADERS = {

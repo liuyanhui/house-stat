@@ -30,7 +30,7 @@ python script/gen_html.py --md in.md --out out.html
 
 ### `validate.py`
 
-独立数据完整性校验：逐月校验 `area_monthly`/`price_monthly` 各段成交加总 ≈ `district_monthly` 全市（阈值 5%），不一致非零退出。`main.py` 抓取后也会自动调用同一 `utils.validate_integrity`。
+独立数据完整性校验：分段加总 vs 全市（5%）、住宅≤总计、日月对账（0.5%），并提示 `KNOWN_ISSUES` 白名单内的存量历史异常；不一致非零退出。`main.py` 抓取后也会自动调用同一 `utils.validate_integrity`，另有 `check_monthly_feeds` 断流门与 `check_daily_freshness` 滞后告警。
 
 ### `gen_ai_digest.py`
 

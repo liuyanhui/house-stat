@@ -21,7 +21,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from utils import validate_integrity  # noqa: E402
+from utils import validate_integrity, check_known_issues  # noqa: E402
 
 
 def main():
@@ -40,9 +40,16 @@ def main():
     print()
 
     ok, issues = validate_integrity(data_dir=args.data_dir)
+    known = check_known_issues(data_dir=args.data_dir)
+
+    if known:
+        print(f'⚠ 已知历史异常（白名单放行，不计失败）{len(known)} 条：')
+        for ym, label, note in known:
+            print(f'  [{ym}] {label} — {note}')
+        print()
 
     if ok:
-        print('✓ 完整性校验通过：面积段/价格段加总与全市一致')
+        print('✓ 完整性校验通过：分段加总与全市一致、住宅≤总计、日月对账无异常')
         sys.exit(0)
     else:
         print(f'✗ 发现 {len(issues)} 处不一致：')

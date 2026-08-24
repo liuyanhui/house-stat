@@ -4,10 +4,36 @@ import pandas as pd
 from .base_parser import safe_int, safe_float
 
 
+def _column_map(header_cells):
+    """按表头文本定位列索引，返回 {字段名: 列号}。
+
+    解决页面改版增删列后位置索引错位的问题（如经纪机构表
+    2026-05 起删掉"发布套数"列，旧位置索引把退房套数误存为签约套数）。
+    表头缺列时该字段不出现在映射里，由调用方以 -1 占位。
+    """
+    col_map = {}
+    for idx, cell in enumerate(header_cells):
+        text = cell.get_text(strip=True)
+        if '序号' in text:
+            col_map['序号'] = idx
+        elif '机构' in text:
+            col_map['机构'] = idx
+        elif '发布' in text:
+            col_map['发布套数'] = idx
+        elif '签约' in text:
+            col_map['签约套数'] = idx
+        elif '退房' in text:
+            col_map['退房套数'] = idx
+    return col_map
+
+
 def parse_agency_data(soup, year_month, logger):
     """
     解析按经纪机构统计的数据
     表格ID: table_clf1
+
+    注意：按表头文本定位列（_column_map），页面改版曾删掉"发布套数"列，
+    旧的位置索引+固定列数判断导致全部行被跳过、数据静默断流。
     """
     logger.info("开始解析经纪机构数据...")
 
@@ -30,30 +56,43 @@ def parse_agency_data(soup, year_month, logger):
         data = []
         for inner_table in inner_tables:
             rows = inner_table.find_all('tr')
+            if not rows:
+                continue
+
+            # 表头行（首行）定位列索引；无法定位时跳过该内表
+            col_map = _column_map(rows[0].find_all('td'))
+            if '序号' not in col_map or '签约套数' not in col_map:
+                logger.warning(f"经纪机构内表表头无法定位列：{[td.get_text(strip=True) for td in rows[0].find_all('td')]}")
+                continue
+
             for row in rows[1:]:
                 cols = row.find_all('td')
-                if len(cols) >= 5:
-                    try:
-                        seq_num = cols[0].text.strip()
-                        agency_name = cols[1].text.strip()
-                        list_count = cols[2].text.strip()
-                        sign_count = cols[3].text.strip()
-                        refund_count = cols[4].text.strip()
+                try:
+                    def _pick(field):
+                        """按列映射取值，列不存在或非数字时返回 -1。"""
+                        idx = col_map.get(field)
+                        if idx is None or idx >= len(cols):
+                            return -1
+                        val = cols[idx].text.strip()
+                        return int(val) if val.isdigit() else -1
 
-                        if not seq_num or not seq_num.isdigit():
-                            continue
-
-                        data.append({
-                            '年月': year_month,
-                            '序号': int(seq_num),
-                            '经纪机构': agency_name,
-                            '发布套数': int(list_count) if list_count.isdigit() else -1,
-                            '签约套数': int(sign_count) if sign_count.isdigit() else -1,
-                            '退房套数': int(refund_count) if refund_count.isdigit() else -1
-                        })
-                    except (ValueError, IndexError) as e:
-                        logger.warning(f"跳过异常行：{e}")
+                    seq_num = cols[col_map['序号']].text.strip() if col_map['序号'] < len(cols) else ''
+                    if not seq_num or not seq_num.isdigit():
                         continue
+
+                    agency_name = cols[col_map['机构']].text.strip() if '机构' in col_map and col_map['机构'] < len(cols) else ''
+
+                    data.append({
+                        '年月': year_month,
+                        '序号': int(seq_num),
+                        '经纪机构': agency_name,
+                        '发布套数': _pick('发布套数'),
+                        '签约套数': _pick('签约套数'),
+                        '退房套数': _pick('退房套数')
+                    })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"跳过异常行：{e}")
+                    continue
 
         df = pd.DataFrame(data)
         logger.info(f"成功解析经纪机构数据 {len(df)} 条")
@@ -171,8 +210,9 @@ def parse_area_data(soup, year_month, logger):
     表格ID: table_clf3
 
     注意：页面改版后该表为 5 行结构（表头 / 发布套数 / 发布面积 / 成交套数 / 成交面积）。
-    本函数按表头文本定位"成交套数""成交面积"行，避免位置索引导致的误抓
+    本函数按表头文本定位各行，避免位置索引导致的误抓
     （旧版本曾把"发布套数"误存为"成交套数"）。
+    发布套数/发布面积两行 2026 年起有真实数据，早期页面无此行时输出 -1 占位。
     """
     logger.info("开始解析面积数据...")
 
@@ -197,6 +237,9 @@ def parse_area_data(soup, year_month, logger):
         area_ranges = _find_row_by_label(rows, '面积')
         deal_counts = _find_row_by_label(rows, '成交套数')
         deal_areas = _find_row_by_label(rows, '成交面积')
+        # 发布侧行（2026 年页面改版后开始发布真实数据；早期页面无此行时以 -1 占位）
+        list_counts = _find_row_by_label(rows, '发布套数')
+        list_areas = _find_row_by_label(rows, '发布面积')
 
         if not area_ranges or not deal_counts or not deal_areas:
             logger.error(
@@ -206,16 +249,22 @@ def parse_area_data(soup, year_month, logger):
             )
             return pd.DataFrame()
 
-        logger.info(f"面积数据：找到{len(area_ranges)}个区间")
+        logger.info(f"面积数据：找到{len(area_ranges)}个区间，发布侧{bool(list_counts and list_areas)}")
 
         data = []
         for i, area_range in enumerate(area_ranges):
             if i < len(deal_counts) and i < len(deal_areas):
                 count_val = safe_int(deal_counts[i]) if deal_counts[i] else -1
                 area_val = safe_float(deal_areas[i]) if deal_areas[i] else -1
+                list_count_val = (safe_int(list_counts[i])
+                                  if list_counts and i < len(list_counts) and list_counts[i] else -1)
+                list_area_val = (safe_float(list_areas[i])
+                                 if list_areas and i < len(list_areas) and list_areas[i] else -1)
                 data.append({
                     '年月': year_month,
                     '面积区间': area_range,
+                    '发布套数': list_count_val,
+                    '发布面积': list_area_val,
                     '成交套数': count_val,
                     '成交面积': area_val,
                 })

@@ -14,7 +14,9 @@ from utils import (
     display_results,
     extend_csv_columns,
     extend_agency_csv,
-    validate_integrity
+    validate_integrity,
+    check_monthly_feeds,
+    check_daily_freshness
 )
 from parsers import (
     extract_data_month,
@@ -69,8 +71,22 @@ def main():
         if not df_daily.empty:
             extend_csv_columns(df_daily, config.RESALE_DAILY_CSV, logger)
 
+        if not df_area.empty:
+            extend_csv_columns(df_area, config.AREA_CSV, logger)
+
         if not df_agency.empty:
             extend_agency_csv(df_agency, config.AGENCY_CSV, logger)
+
+        # 3.6. 断流门：月度表解析为空且页面月份比库内新 → 数据正在错过，
+        # 非零退出（经纪机构表曾改版断流 3 个月未被发现，加此门防复发）
+        ok_feed, feed_issues = check_monthly_feeds(year_month, {
+            '经纪机构': (df_agency, config.AGENCY_CSV),
+            '区县': (df_district, config.DISTRICT_CSV),
+            '面积': (df_area, config.AREA_CSV),
+            '价格': (df_price, config.PRICE_CSV),
+        }, logger=logger)
+        if not ok_feed:
+            raise SystemExit(1)
 
         # 4. 保存到CSV
         logger.info("-" * 50)
@@ -134,16 +150,19 @@ def main():
             df_new_commercial_daily
         )
 
-        # 7. 数据完整性校验（面积段/价格段加总 vs 全市，阈值 5%）
+        # 7. 数据完整性校验（分段加总 vs 全市、住宅≤总计、日月对账）
         # 不一致则非零退出，让定时任务可见，避免静默写入脏数据
         logger.info("-" * 50)
         logger.info("数据完整性校验...")
         ok, issues = validate_integrity(logger=logger)
         if ok:
-            logger.info("完整性校验通过：面积段/价格段加总与全市一致")
+            logger.info("完整性校验通过")
         else:
             logger.error(f"完整性校验发现 {len(issues)} 处不一致，数据可能有问题，详见上方日志")
             raise SystemExit(1)
+
+        # 8. 滞后告警：日度数据落后于昨天（页面未更新或漏爬），仅告警不阻断
+        check_daily_freshness(logger=logger)
 
         logger.info("=" * 50)
         logger.info("数据抓取完成！")

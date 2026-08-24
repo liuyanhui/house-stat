@@ -38,6 +38,12 @@ env/
 log/
 *.log
 report/
+# 原始 HTML 存档（约 58KB/天，本地保留即可回补，不入库）
+data/raw/
+# 列结构迁移备份（extend/重构时的本地 .bak，不入库）
+data/*.bak
+data/*.bak2
+data/*.pre_clean
 
 # Claude Code
 .claude/settings.local.json
