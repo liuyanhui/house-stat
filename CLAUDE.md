@@ -20,7 +20,8 @@ python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（rep
 ## 数据流
 
 ```
-main.py → fetcher → parsers → storage(去重写 data/*.csv) → validate_integrity(校验门)
+main.py → fetcher(存档 data/raw/) → parsers → storage(去重写 data/*.csv)
+        → check_monthly_feeds(断流门) → validate_integrity(校验门) → check_daily_freshness(滞后告警)
 script/analyze.py --report → analysis.load → metrics → plots(PNG) → report(md) → html_render(html)
 ```
 
@@ -53,7 +54,7 @@ script/analyze.py --report → analysis.load → metrics → plots(PNG) → repo
 
 1. **数据可靠性优先**：自爬/官方是基准；第三方历史未纳入主序列（口径/可靠性，媒体历史多锁图片/微信门）。
 2. **校验门是防线**：改解析器或数据后必跑 `script/validate.py`，面积/价格段加总必须 ≈ 全市（5%）。
-3. **`parse_area_data` 按表头文本定位行**，勿改回位置索引（曾因页面改版把"发布套数"误存为"成交套数"）。
+3. **`parse_area_data` 按表头文本定位行**，勿改回位置索引（曾因页面改版把"发布套数"误存为"成交套数"）——此条已推广为所有解析器的总纲，见约定 9。
 4. **plots 宽表 index 先转字符串**（`_str_index`），否则 x 轴 Period 序数错位。
 5. **节假日用 `chinese_calendar`**，勿用旧的"低于工作日均值 15%"循环逻辑。
 6. **预测分层**：确定性代码报告（trend_report）不含预测，仅历史事实；**AI 分析层（ai_digest→AI）可做预判**，但按资深分析师纪律——区分事实/判断、短 horizon（1–3 月）、情景化、给置信度+证伪条件，预判非事实非定论、不含价格、不作买卖建议。
@@ -68,4 +69,4 @@ script/analyze.py --report → analysis.load → metrics → plots(PNG) → repo
 - **新房（new_*）联动分析**：new_daily 仅 ~3 个月，待累积。
 - **面积段/区县长历史**：随 main.py 每月自动累积变厚。
 - **预测**：确定性报告（trend_report）明确不做；预判只在 ai_digest 层。
-- **自动化测试**：目前是功能级实测 + 数字对账，无 pytest，可补 `tests/`。
+- **自动化测试**：无 pytest。页面改版时可用 `data/raw/` 存档回放验证解析器（对照页面实测值逐字段断言），可把该做法收编为 `tests/`。
