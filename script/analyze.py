@@ -9,6 +9,8 @@
 import argparse
 import os
 import sys
+import webbrowser
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import chinese_calendar as cc
@@ -474,6 +476,11 @@ def run_report(data_dir):
     print(f'趋势报告已生成: {out}')
     print(f'HTML 报告: {html_path}')
     print(f'图表目录: {config.REPORT_DIR}')
+    # 生成后自动用默认浏览器打开（执行即展示）；无浏览器环境仅提示不报错
+    try:
+        webbrowser.open(Path(html_path).as_uri())
+    except Exception as e:
+        print(f'提示: 无法自动打开浏览器({e})，请手动打开 {html_path}', file=sys.stderr)
     return out
 
 

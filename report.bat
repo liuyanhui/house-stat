@@ -23,6 +23,7 @@ if errorlevel 1 (
 
 echo.
 echo Report: report\trend_report.md
+echo HTML:   report\trend_report.html  (opened in browser)
 echo Charts: report\*.png
 echo.
 echo ========================================

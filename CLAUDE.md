@@ -9,7 +9,7 @@
 ```bash
 pip install -r requirements.txt
 python main.py                      # 抓取最新数据（含完整性校验门，失败非零退出）
-python script/analyze.py --report   # 生成趋势报告（report/ 下 md + html + png）
+python script/analyze.py --report   # 生成趋势报告（report/ 下 md + html + png），完成后自动在浏览器打开 HTML；一键入口 report.bat
 python script/validate.py           # 独立数据完整性校验
 python script/gen_html.py           # 单独把 trend_report.md 转成自包含 html
 python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（report/ai_digest.md，手动喂 LLM）
