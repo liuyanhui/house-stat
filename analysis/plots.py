@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Patch
 
 import config
 
@@ -78,12 +79,15 @@ def city_trend(monthly_ma, out='city_trend.png'):
     valid_yoy = ~np.isnan(yoy)
     colors = ['#31a354' if v >= 0 else '#e6550d' for v in np.where(valid_yoy, yoy, 0)]
     ax2.bar(x[valid_yoy], yoy[valid_yoy], color=[c for c, v in zip(colors, valid_yoy) if v],
-            alpha=0.35, width=0.5, label='同比')
+            alpha=0.35, width=0.5)
     ax2.set_ylabel('同比 %', color='#555')
     ax2.axhline(0, color='#888', lw=0.8)
 
+    # 双轴图例合并：左轴序列 + 右轴同比柱（绿=上涨/橙=下跌）用代理色块补全
     h1, l1 = ax1.get_legend_handles_labels()
-    ax1.legend(h1, l1, loc='upper left', fontsize=9)
+    yoy_proxies = [Patch(facecolor='#31a354', alpha=0.35, label='同比上涨（右轴）'),
+                   Patch(facecolor='#e6550d', alpha=0.35, label='同比下跌（右轴）')]
+    ax1.legend(handles=h1 + yoy_proxies, loc='upper left', fontsize=9)
     return _save(fig, out)
 
 
@@ -296,8 +300,10 @@ def weekly_trend(weekly, out='weekly_trend.png'):
     ax1.set_xticklabels([d.strftime('%m/%d') for d in wk['week_start'][::step]],
                         rotation=45, ha='right', fontsize=8)
 
+    # 双轴图例合并：绿线（右轴面积）也要进图例
     h1, l1 = ax1.get_legend_handles_labels()
-    ax1.legend(h1, l1, loc='upper left', fontsize=9)
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc='upper left', fontsize=9)
     return _save(fig, out)
 
 
