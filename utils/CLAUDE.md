@@ -12,7 +12,7 @@
 - `ensure_directories`（来自 directory）
 - `setup_logging`（来自 logging_setup）
 - `fetch_html`（来自 fetcher）
-- `save_to_csv`, `display_results`, `extend_csv_columns`, `extend_agency_csv`（来自 storage）
+- `save_to_csv`, `display_results`, `extend_csv_columns`（来自 storage）
 - `validate_integrity`, `check_monthly_feeds`, `check_daily_freshness`, `check_known_issues`（来自 validate）
 
 ### `fetcher.py`
@@ -32,8 +32,7 @@
 |------|------|
 | `save_to_csv(df, csv_file, key_column, logger)` | 将 DataFrame 保存到 CSV 文件。通过主键列自动去重，已存在数据跳过，仅追加新数据。返回 `(新增条数, 跳过条数, 新增数据DataFrame)`。 |
 | `display_results(...)` | 在控制台展示本次新增的所有数据（每日签约、月度汇总、经纪机构排行、区县分布、面积区间、价格区间、五年历史等）。 |
-| `extend_csv_columns(df, csv_file, logger)` | 扩展 CSV 列数以实现向后兼容。当程序新增了数据列而旧文件缺少时，自动补 `-1` 并生成 `.bak` 备份。 |
-| `extend_agency_csv(df, csv_file, logger)` | 扩展经纪机构 CSV 文件，为旧文件补充"发布套数"列。 |
+| `extend_csv_columns(df, csv_file, logger)` | 扩展 CSV 列数以实现向后兼容。当程序新增了数据列而旧文件缺少时，自动补 `-1` 并生成 `.bak` 备份。稳态下只读表头（`nrows=0`），确有列迁移才整读重建。 |
 
 ### `directory.py`
 

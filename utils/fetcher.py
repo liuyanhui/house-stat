@@ -13,6 +13,7 @@ def _archive_html(html, logger):
     （经纪机构表 2026-05/06 两个月即因此永久丢失）。存档不进 git。
     """
     try:
+        # ensure_directories() 已建过目录；此处兜底保证 fetch_html 可独立调用
         os.makedirs(config.RAW_DIR, exist_ok=True)
         path = os.path.join(config.RAW_DIR, f"{date.today().isoformat()}.html")
         # 同日多次抓取以最后一次为准

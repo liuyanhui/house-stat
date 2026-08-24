@@ -33,6 +33,16 @@ def _clean_district_name(s):
     return str(s).strip().replace('　', '').replace(' ', '')
 
 
+def _read_csv(path, usecols=None):
+    """读取 CSV；不存在或读取失败返回 None（调用方按缺数据跳过）。"""
+    if not os.path.exists(path):
+        return None
+    try:
+        return pd.read_csv(path, encoding=config.CSV_ENCODING, usecols=usecols)
+    except Exception:
+        return None
+
+
 def _city_totals(district_df):
     """从 district 数据取每月"全市"签约套数，返回 {年月: 套数}。"""
     if district_df.empty:
@@ -74,27 +84,24 @@ def _norm_month(ym):
 
 
 def _check_monthly_consistency(data_dir, logger=None):
-    """resale_monthly 一致性：
+    """resale_monthly 一致性，返回 (issues, known_present)：
     a) 住宅签约套数/面积 ≤ 对应总计（能抓住总/住错位或丢位数字）；
     b) 日度加总 vs 月度对账——仅当该月日度覆盖完整（行数=自然天数）时校验，
        覆盖不完整的月份跳过（历史空洞不是数据错误）。
+    KNOWN_ISSUES 白名单命中的 (年月, 类型) 不计入 issues，收入 known_present
+    （check_known_issues 复用同一份检测逻辑）。
     """
-    issues = []
-    monthly_path = os.path.join(data_dir, 'resale_monthly.csv')
-    if not os.path.exists(monthly_path):
-        return issues
+    issues, known_present = [], []
+    m = _read_csv(os.path.join(data_dir, 'resale_monthly.csv'))
+    if m is None:
+        return issues, known_present
 
-    m = pd.read_csv(monthly_path, encoding=config.CSV_ENCODING)
-
-    daily_sum = {}
-    daily_path = os.path.join(data_dir, 'resale_daily.csv')
-    if os.path.exists(daily_path):
-        d = pd.read_csv(daily_path, encoding=config.CSV_ENCODING)
+    daily_sum, daily_rows = {}, {}
+    d = _read_csv(os.path.join(data_dir, 'resale_daily.csv'), usecols=['日期', '签约套数'])
+    if d is not None:
         d = d.assign(ym=pd.to_datetime(d['日期']).dt.strftime('%Y-%m'))
         daily_sum = d.groupby('ym')['签约套数'].sum().to_dict()
         daily_rows = d.groupby('ym').size().to_dict()
-    else:
-        daily_rows = {}
 
     for _, r in m.iterrows():
         ym = _norm_month(r['月份'])
@@ -107,6 +114,7 @@ def _check_monthly_consistency(data_dir, logger=None):
         for label, sub, total in checks:
             if total > 0 and sub > total:
                 if (ym, label) in KNOWN_ISSUES:
+                    known_present.append((ym, label, KNOWN_ISSUES[(ym, label)]))
                     if logger:
                         logger.warning(
                             f"已知数据异常（白名单放行）[{ym}] {label}：{sub} vs {total}，"
@@ -135,26 +143,12 @@ def _check_monthly_consistency(data_dir, logger=None):
                     '偏差': f'{(dsum - total) / total * 100:+.1f}%',
                 })
 
-    return issues
+    return issues, known_present
 
 
 def check_known_issues(data_dir=None):
     """返回当前数据中仍然存在的已知历史异常（白名单项），供校验脚本提示。"""
-    data_dir = data_dir or config.DATA_DIR
-    present = []
-    monthly_path = os.path.join(data_dir, 'resale_monthly.csv')
-    if not os.path.exists(monthly_path):
-        return present
-    try:
-        m = pd.read_csv(monthly_path, encoding=config.CSV_ENCODING)
-    except Exception:
-        return present
-    for _, r in m.iterrows():
-        ym = _norm_month(r['月份'])
-        if (ym, '住宅签约面积>网上签约面积') in KNOWN_ISSUES:
-            if r['网上签约面积(m2)'] > 0 and r['住宅签约面积(m2)'] > r['网上签约面积(m2)']:
-                present.append((ym, '住宅签约面积>网上签约面积', KNOWN_ISSUES[(ym, '住宅签约面积>网上签约面积')]))
-    return present
+    return _check_monthly_consistency(data_dir or config.DATA_DIR)[1]
 
 
 def validate_integrity(data_dir=None, logger=None):
@@ -184,7 +178,7 @@ def validate_integrity(data_dir=None, logger=None):
             price = pd.read_csv(price_path, encoding=config.CSV_ENCODING)
             issues += _check_segment(price, '成交套数', city_totals, '价格段')
 
-    issues += _check_monthly_consistency(data_dir, logger=logger)
+    issues += _check_monthly_consistency(data_dir, logger=logger)[0]
 
     if logger is not None:
         for it in issues:
@@ -213,14 +207,9 @@ def check_monthly_feeds(year_month, feeds, logger=None):
     for name, (df, csv_path) in feeds.items():
         if df is not None and not df.empty:
             continue
-        if not os.path.exists(csv_path):
-            continue  # 无历史基线（首次运行），无法判定断流
-        try:
-            existing = pd.read_csv(csv_path, encoding=config.CSV_ENCODING)
-        except Exception:
-            continue
-        if existing.empty or '年月' not in existing.columns:
-            continue
+        existing = _read_csv(csv_path)
+        if existing is None or existing.empty or '年月' not in existing.columns:
+            continue  # 无历史基线（首次运行/读取失败），无法判定断流
         latest = existing['年月'].astype(str).max()
         if ym > latest:
             issues.append(
@@ -245,21 +234,15 @@ def check_daily_freshness(data_dir=None, logger=None, today=None):
 
     warnings = []
     for fname, label in [('resale_daily.csv', '存量房日度'), ('new_daily.csv', '商品房日度')]:
-        path = os.path.join(data_dir, fname)
-        if not os.path.exists(path):
+        df = _read_csv(os.path.join(data_dir, fname), usecols=['日期'])
+        if df is None or df.empty:
             continue
-        try:
-            df = pd.read_csv(path, encoding=config.CSV_ENCODING)
-            if df.empty or '日期' not in df.columns:
-                continue
-            latest = pd.to_datetime(df['日期']).max().normalize()
-            if latest < yesterday:
-                warnings.append(
-                    f"{label}数据最新日期 {latest:%Y-%m-%d} 早于昨天 {yesterday:%Y-%m-%d}"
-                    f"（页面未更新当日数据或本次未抓到）"
-                )
-        except Exception:
-            continue
+        latest = pd.to_datetime(df['日期']).max().normalize()
+        if latest < yesterday:
+            warnings.append(
+                f"{label}数据最新日期 {latest:%Y-%m-%d} 早于昨天 {yesterday:%Y-%m-%d}"
+                f"（页面未更新当日数据或本次未抓到）"
+            )
     if logger is not None:
         for w in warnings:
             logger.warning(f"滞后告警 {w}")

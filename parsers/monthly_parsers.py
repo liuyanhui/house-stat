@@ -1,7 +1,7 @@
 """月度数据解析器"""
 import re
 import pandas as pd
-from .base_parser import safe_int, safe_float
+from .base_parser import safe_int, safe_float, normalize_label
 
 
 def _column_map(header_cells):
@@ -25,6 +25,17 @@ def _column_map(header_cells):
         elif '退房' in text:
             col_map['退房套数'] = idx
     return col_map
+
+
+def _cell(cols, col_map, field):
+    """按列映射取单元格文本；列缺失或越界返回 ''（safe_int/safe_float 会转 -1）。"""
+    idx = col_map.get(field)
+    return cols[idx].text.strip() if idx is not None and idx < len(cols) else ''
+
+
+def _nth(row_vals, i):
+    """行值列表第 i 个；行缺失/越界/空串返回 ''（safe_* 统一转 -1）。"""
+    return row_vals[i] if row_vals and i < len(row_vals) and row_vals[i] else ''
 
 
 def parse_agency_data(soup, year_month, logger):
@@ -67,32 +78,18 @@ def parse_agency_data(soup, year_month, logger):
 
             for row in rows[1:]:
                 cols = row.find_all('td')
-                try:
-                    def _pick(field):
-                        """按列映射取值，列不存在或非数字时返回 -1。"""
-                        idx = col_map.get(field)
-                        if idx is None or idx >= len(cols):
-                            return -1
-                        val = cols[idx].text.strip()
-                        return int(val) if val.isdigit() else -1
-
-                    seq_num = cols[col_map['序号']].text.strip() if col_map['序号'] < len(cols) else ''
-                    if not seq_num or not seq_num.isdigit():
-                        continue
-
-                    agency_name = cols[col_map['机构']].text.strip() if '机构' in col_map and col_map['机构'] < len(cols) else ''
-
-                    data.append({
-                        '年月': year_month,
-                        '序号': int(seq_num),
-                        '经纪机构': agency_name,
-                        '发布套数': _pick('发布套数'),
-                        '签约套数': _pick('签约套数'),
-                        '退房套数': _pick('退房套数')
-                    })
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"跳过异常行：{e}")
+                seq_num = _cell(cols, col_map, '序号')
+                if not seq_num.isdigit():
                     continue
+
+                data.append({
+                    '年月': year_month,
+                    '序号': int(seq_num),
+                    '经纪机构': _cell(cols, col_map, '机构'),
+                    '发布套数': safe_int(_cell(cols, col_map, '发布套数')),
+                    '签约套数': safe_int(_cell(cols, col_map, '签约套数')),
+                    '退房套数': safe_int(_cell(cols, col_map, '退房套数'))
+                })
 
         df = pd.DataFrame(data)
         logger.info(f"成功解析经纪机构数据 {len(df)} 条")
@@ -187,19 +184,23 @@ def parse_district_data(soup, year_month, logger):
         return pd.DataFrame()
 
 
-def _find_row_by_label(rows, *labels):
+def _find_row_by_label(rows, *labels, exact=False):
     """按首列文本定位数据行，返回去掉首列后的单元格文本列表。
 
-    labels 为可匹配的关键字（任一命中即可），匹配前会去除空白。
+    labels 为可匹配的关键字（任一命中即可），匹配前经 normalize_label 规范化。
+    exact=True 时要求整格文本相等——用于表头行：如面积表头'面积'与数据行
+    '发布面积'/'成交面积'是子串关系，子串匹配只因表头恰好排第一才没撞上，
+    页面重排行后会把数据行误当表头。
     解决写死位置索引在页面改版后抓错行的问题（见 parse_area_data 的历史 bug）。
     """
     for tr in rows:
         cells = tr.find_all('td')
         if not cells:
             continue
-        head = cells[0].get_text(strip=True).replace('　', '').replace(' ', '')
+        head = normalize_label(cells[0].get_text(strip=True))
         for lab in labels:
-            if lab.replace(' ', '') in head:
+            lab = normalize_label(lab)
+            if (head == lab) if exact else (lab in head):
                 return [td.get_text(strip=True) for td in cells[1:]]
     return None
 
@@ -233,8 +234,8 @@ def parse_area_data(soup, year_month, logger):
             logger.error(f"面积表格行数不足，期望至少3行，实际{len(rows)}行")
             return pd.DataFrame()
 
-        # 按表头文本定位行，禁用位置索引
-        area_ranges = _find_row_by_label(rows, '面积')
+        # 按表头文本定位行，禁用位置索引；表头行用精确匹配（'面积'是'发布面积'等的子串）
+        area_ranges = _find_row_by_label(rows, '面积', exact=True)
         deal_counts = _find_row_by_label(rows, '成交套数')
         deal_areas = _find_row_by_label(rows, '成交面积')
         # 发布侧行（2026 年页面改版后开始发布真实数据；早期页面无此行时以 -1 占位）
@@ -253,21 +254,14 @@ def parse_area_data(soup, year_month, logger):
 
         data = []
         for i, area_range in enumerate(area_ranges):
-            if i < len(deal_counts) and i < len(deal_areas):
-                count_val = safe_int(deal_counts[i]) if deal_counts[i] else -1
-                area_val = safe_float(deal_areas[i]) if deal_areas[i] else -1
-                list_count_val = (safe_int(list_counts[i])
-                                  if list_counts and i < len(list_counts) and list_counts[i] else -1)
-                list_area_val = (safe_float(list_areas[i])
-                                 if list_areas and i < len(list_areas) and list_areas[i] else -1)
-                data.append({
-                    '年月': year_month,
-                    '面积区间': area_range,
-                    '发布套数': list_count_val,
-                    '发布面积': list_area_val,
-                    '成交套数': count_val,
-                    '成交面积': area_val,
-                })
+            data.append({
+                '年月': year_month,
+                '面积区间': area_range,
+                '发布套数': safe_int(_nth(list_counts, i)),
+                '发布面积': safe_float(_nth(list_areas, i)),
+                '成交套数': safe_int(_nth(deal_counts, i)),
+                '成交面积': safe_float(_nth(deal_areas, i)),
+            })
 
         df = pd.DataFrame(data)
         logger.info(f"成功解析面积数据 {len(df)} 条")
@@ -284,6 +278,9 @@ def parse_price_data(soup, year_month, logger):
     """
     解析按价格统计的数据
     表格ID: table_clf4
+
+    与面积表同族（表头/发布套数/发布面积/成交套数/成交面积 5 行结构），
+    同样按表头文本定位行，不用位置索引。
     """
     logger.info("开始解析价格数据...")
 
@@ -293,61 +290,40 @@ def parse_price_data(soup, year_month, logger):
             logger.error("未找到价格数据表格")
             return pd.DataFrame()
 
-        inner_table = outer_table.find('table', bordercolor=lambda x: x and '#4a9ee0' in x)
+        # bordercolor 选择器在页面改版后已失效，统一走内层首个 table
+        inner_table = outer_table.find('table')
         if not inner_table:
-            inner_table = outer_table.find('table')
-            if not inner_table:
-                logger.error("未找到内层价格数据表格")
-                return pd.DataFrame()
+            logger.error("未找到内层价格数据表格")
+            return pd.DataFrame()
 
         rows = inner_table.find_all('tr')
 
-        if len(rows) < 5:
-            logger.error(f"价格表格行数不足，期望至少5行，实际{len(rows)}行")
+        price_ranges = _find_row_by_label(rows, '价格', exact=True)
+        list_counts = _find_row_by_label(rows, '发布套数')
+        list_areas = _find_row_by_label(rows, '发布面积')
+        deal_counts = _find_row_by_label(rows, '成交套数')
+        deal_areas = _find_row_by_label(rows, '成交面积')
+
+        if not price_ranges or not deal_counts or not deal_areas:
+            logger.error(
+                f"价格表格行定位失败（区间={bool(price_ranges)}, "
+                f"成交套数={bool(deal_counts)}, 成交面积={bool(deal_areas)}），"
+                f"实际行数={len(rows)}"
+            )
             return pd.DataFrame()
-
-        price_header_row = rows[0].find_all('td')
-        price_ranges = [td.get_text(strip=True) for td in price_header_row[1:]]
-
-        list_count_row = rows[1].find_all('td')
-        list_counts = [td.get_text(strip=True) for td in list_count_row[1:]]
-
-        list_area_row = rows[2].find_all('td')
-        list_areas = [td.get_text(strip=True) for td in list_area_row[1:]]
-
-        deal_count_row = rows[3].find_all('td')
-        deal_counts = [td.get_text(strip=True) for td in deal_count_row[1:]]
-
-        deal_area_row = rows[4].find_all('td')
-        deal_areas = [td.get_text(strip=True) for td in deal_area_row[1:]]
 
         logger.info(f"价格数据：找到{len(price_ranges)}个区间")
 
         data = []
         for i, price_range in enumerate(price_ranges):
-            if i < len(list_counts) and i < len(list_areas) and i < len(deal_counts) and i < len(deal_areas):
-                try:
-                    list_count_str = list_counts[i].replace(',', '').strip()
-                    list_area_str = list_areas[i].replace(',', '').strip()
-                    deal_count_str = deal_counts[i].replace(',', '').strip()
-                    deal_area_str = deal_areas[i].replace(',', '').strip()
-
-                    list_count_val = float(list_count_str) if list_count_str else -1
-                    list_area_val = float(list_area_str) if list_area_str else -1
-                    deal_count_val = float(deal_count_str) if deal_count_str else -1
-                    deal_area_val = float(deal_area_str) if deal_area_str else -1
-
-                    data.append({
-                        '年月': year_month,
-                        '价格区间': price_range,
-                        '发布套数': int(list_count_val) if list_count_val == int(list_count_val) else list_count_val,
-                        '发布面积': list_area_val,
-                        '成交套数': int(deal_count_val) if deal_count_val == int(deal_count_val) else deal_count_val,
-                        '成交面积': deal_area_val
-                    })
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"跳过异常数据：价格区间={price_range}, 错误={e}")
-                    continue
+            data.append({
+                '年月': year_month,
+                '价格区间': price_range,
+                '发布套数': safe_int(_nth(list_counts, i)),
+                '发布面积': safe_float(_nth(list_areas, i)),
+                '成交套数': safe_int(_nth(deal_counts, i)),
+                '成交面积': safe_float(_nth(deal_areas, i)),
+            })
 
         df = pd.DataFrame(data)
         logger.info(f"成功解析价格数据 {len(df)} 条")

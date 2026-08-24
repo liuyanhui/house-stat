@@ -13,7 +13,6 @@ from utils import (
     save_to_csv,
     display_results,
     extend_csv_columns,
-    extend_agency_csv,
     validate_integrity,
     check_monthly_feeds,
     check_daily_freshness
@@ -73,9 +72,6 @@ def main():
 
         if not df_area.empty:
             extend_csv_columns(df_area, config.AREA_CSV, logger)
-
-        if not df_agency.empty:
-            extend_agency_csv(df_agency, config.AGENCY_CSV, logger)
 
         # 3.6. 断流门：月度表解析为空且页面月份比库内新 → 数据正在错过，
         # 非零退出（经纪机构表曾改版断流 3 个月未被发现，加此门防复发）

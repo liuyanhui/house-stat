@@ -14,6 +14,15 @@ def safe_int(value, default=-1):
         return default
 
 
+def normalize_label(text):
+    """单元格标签规范化：去全角/半角空格与不间断空格。
+
+    表头/行标签匹配的公共基础（页面常用'面　积'式全角空格对齐），
+    各解析器勿再内联重复此逻辑。
+    """
+    return str(text).replace('　', '').replace(' ', '').replace(' ', '')
+
+
 def safe_float(value, default=-1):
     """安全转换为浮点数，失败返回默认值"""
     try:

@@ -1,7 +1,32 @@
 """每日数据解析器"""
 import re
 import pandas as pd
-from .base_parser import safe_int, safe_float
+from .base_parser import safe_int, safe_float, normalize_label
+
+
+_SIGN_TITLE = re.compile(r'(\d{4})/(\d{1,2})/(\d{1,2})存量房网上签约')
+
+
+def _fmt_ymd(match):
+    """日期正则 match → 'YYYY-MM-DD'（补零）。"""
+    return f"{match.group(1)}-{match.group(2).zfill(2)}-{match.group(3).zfill(2)}"
+
+
+def _find_table_by_title(soup, title_pattern):
+    """按表格首行标题定位表格，返回 (table, match)。
+
+    标题独占表格首个 <tr>（如"2026/8/23存量房网上签约"）。
+    不能用 find_all(text=True) 找标题——会命中 <script> 内同名文本
+    而定位到外层容器表（见 parsers/CLAUDE.md 约定 2）。
+    """
+    for table in soup.find_all('table'):
+        first = table.find('tr')
+        if first is None:
+            continue
+        match = title_pattern.search(first.get_text(strip=True))
+        if match:
+            return table, match
+    return None, None
 
 
 def parse_daily_data(soup, logger):
@@ -10,27 +35,17 @@ def parse_daily_data(soup, logger):
 
     历史上还解析"可售房源统计""新发布房源"两表（8 列），页面已删除
     该栏目，相关列恒为 -1 占位，已一并清理（2026-08）。
-    日期从"YYYY/M/D存量房网上签约"表格标题中提取。
+    日期从"YYYY/M/D存量房网上签约"表格首行标题中提取。
     """
     logger.info("开始解析每日数据...")
 
     try:
-        # 从"存量房网上签约"表标题中提取日期
-        date_str = None
-        date_pattern = re.compile(r'(\d{4})/(\d{1,2})/(\d{1,2})存量房网上签约')
-        for element in soup.find_all(text=True):
-            match = date_pattern.search(str(element))
-            if match:
-                year = match.group(1)
-                month = match.group(2).zfill(2)
-                day = match.group(3).zfill(2)
-                date_str = f"{year}-{month}-{day}"
-                logger.info(f"从存量房网上签约标题提取日期：{date_str}")
-                break
-
-        if not date_str:
-            logger.error("无法提取日期，跳过每日数据解析")
+        table, match = _find_table_by_title(soup, _SIGN_TITLE)
+        if table is None:
+            logger.error("无法定位存量房网上签约表格，跳过每日数据解析")
             return pd.DataFrame()
+        date_str = _fmt_ymd(match)
+        logger.info(f"从存量房网上签约标题提取日期：{date_str}")
 
         # 初始化数据字典
         data = {
@@ -43,27 +58,22 @@ def parse_daily_data(soup, logger):
 
         # 解析存量房网上签约数据（逐 td 对扫描 label/value）
         try:
-            for table in soup.find_all('table'):
-                table_text = table.get_text()
-                if date_pattern.search(table_text):
-                    rows = table.find_all('tr')
-                    for row in rows:
-                        cols = row.find_all('td')
-                        for i in range(len(cols) - 1):
-                            label = cols[i].get_text(strip=True)
-                            value = cols[i + 1].get_text(strip=True)
+            for row in table.find_all('tr'):
+                cols = row.find_all('td')
+                for i in range(len(cols) - 1):
+                    label = cols[i].get_text(strip=True)
+                    value = cols[i + 1].get_text(strip=True)
 
-                            if '网上签约套数' in label and '住宅' not in label:
-                                data['签约套数'] = safe_int(value)
-                            elif '网上签约面积' in label and '住宅' not in label:
-                                area_value = value.replace('m²', '').replace('M2', '').replace(' ', '').strip()
-                                data['签约面积'] = safe_float(area_value)
-                            elif '住宅签约套数' in label:
-                                data['住宅签约套数'] = safe_int(value)
-                            elif '住宅签约面积' in label:
-                                area_value = value.replace('m²', '').replace('M2', '').replace(' ', '').strip()
-                                data['住宅签约面积'] = safe_float(area_value)
-                    break
+                    if '网上签约套数' in label and '住宅' not in label:
+                        data['签约套数'] = safe_int(value)
+                    elif '网上签约面积' in label and '住宅' not in label:
+                        area_value = value.replace('m²', '').replace('M2', '').replace(' ', '').strip()
+                        data['签约面积'] = safe_float(area_value)
+                    elif '住宅签约套数' in label:
+                        data['住宅签约套数'] = safe_int(value)
+                    elif '住宅签约面积' in label:
+                        area_value = value.replace('m²', '').replace('M2', '').replace(' ', '').strip()
+                        data['住宅签约面积'] = safe_float(area_value)
         except Exception as e:
             logger.warning(f"解析存量房网上签约数据失败：{e}")
 
@@ -82,7 +92,7 @@ def parse_daily_data(soup, logger):
 
 def _clean_label(label):
     """清洗单元格标签：去冒号/空格/全角空格/其中/(M2) 单位，便于按文本精确匹配。"""
-    s = label.replace(' ', '').replace('　', '').replace(' ', '')
+    s = normalize_label(label)
     s = re.sub(r'[（(]\s*[MmＭ]2\s*[)）]', '', s)
     s = s.replace('其中', '')
     return s.rstrip('：:').strip()
@@ -152,14 +162,15 @@ def parse_commercial_data(soup, logger):
     logger.info("开始解析商品房数据...")
 
     try:
-        data = None
+        data = dict.fromkeys(_COMMERCIAL_COL_ORDER[1:], -1)
         date_str = None
 
         for table in soup.find_all('table'):
-            rows = table.find_all('tr')
-            if not rows:
+            # 先只看首行标题，命中再展开全部行（避免容器表整树展开）
+            first = table.find('tr')
+            if first is None:
                 continue
-            title = rows[0].get_text(strip=True)
+            title = first.get_text(strip=True)
 
             for keyword, dated, label_map, area_map in _COMMERCIAL_TABLES:
                 if keyword not in title:
@@ -171,15 +182,12 @@ def parse_commercial_data(soup, logger):
                     if not m:
                         continue
                     if date_str is None:
-                        date_str = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+                        date_str = _fmt_ymd(m)
                         logger.info(f"从{keyword}标题提取日期：{date_str}")
-
-                if data is None:
-                    data = {'日期': date_str}
 
                 # 逐行按 label 解析；独立"面积"行跟随上一个计数列
                 last_count_col = None
-                for row in rows[1:]:
+                for row in table.find_all('tr')[1:]:
                     cols = row.find_all('td')
                     if len(cols) < 2:
                         continue
@@ -199,9 +207,7 @@ def parse_commercial_data(soup, logger):
             logger.error("无法从商品房表标题提取日期，跳过商品房数据解析")
             return pd.DataFrame()
 
-        # 按既有 CSV 列顺序输出，缺失字段以 -1 占位，保证列结构稳定
-        row = {'日期': date_str, **{c: data.get(c, -1) for c in _COMMERCIAL_COL_ORDER[1:]}}
-        df = pd.DataFrame([row])[_COMMERCIAL_COL_ORDER]
+        df = pd.DataFrame([{**data, '日期': date_str}], columns=_COMMERCIAL_COL_ORDER)
         logger.info(f"成功解析商品房数据，日期：{date_str}")
         return df
 

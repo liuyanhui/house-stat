@@ -228,12 +228,13 @@ def extend_csv_columns(df, csv_file, logger):
 
     try:
         required_columns = df.columns.tolist()
-        existing_df = pd.read_csv(csv_file, encoding=config.CSV_ENCODING)
-        existing_columns = existing_df.columns.tolist()
+        # 稳态下列总是一致，只读表头即可；确有迁移再整读
+        existing_columns = pd.read_csv(csv_file, encoding=config.CSV_ENCODING, nrows=0).columns.tolist()
 
         if set(required_columns) != set(existing_columns):
             logger.info(f"检测到 {os.path.basename(csv_file)} 列数不匹配，正在添加新列...")
 
+            existing_df = pd.read_csv(csv_file, encoding=config.CSV_ENCODING)
             for col in required_columns:
                 if col not in existing_columns:
                     existing_df[col] = -1
@@ -246,39 +247,5 @@ def extend_csv_columns(df, csv_file, logger):
 
             existing_df.to_csv(csv_file, index=False, encoding=config.CSV_ENCODING)
             logger.info(f"已更新 {os.path.basename(csv_file)} 的列结构：{len(existing_columns)} -> {len(required_columns)} 列")
-    except Exception as e:
-        logger.warning(f"扩展 {os.path.basename(csv_file)} 列数时出错：{e}")
-
-
-def extend_agency_csv(df, csv_file, logger):
-    """
-    扩展经纪机构CSV文件，添加"发布套数"列
-    """
-    if df.empty:
-        return
-
-    if not os.path.exists(csv_file):
-        return
-
-    try:
-        required_columns = df.columns.tolist()
-        existing_df = pd.read_csv(csv_file, encoding=config.CSV_ENCODING)
-        existing_columns = existing_df.columns.tolist()
-
-        if '发布套数' in required_columns and '发布套数' not in existing_columns:
-            logger.info(f"检测到 {os.path.basename(csv_file)} 缺少'发布套数'列，正在添加...")
-
-            new_existing_df = existing_df.copy()
-            for i, col in enumerate(existing_columns):
-                if col == '签约套数':
-                    new_existing_df.insert(i, '发布套数', -1)
-                    break
-
-            backup_file = csv_file + '.bak'
-            shutil.copy2(csv_file, backup_file)
-            logger.info(f"已备份原文件到 {backup_file}")
-
-            new_existing_df.to_csv(csv_file, index=False, encoding=config.CSV_ENCODING)
-            logger.info(f"已更新 {os.path.basename(csv_file)}，添加'发布套数'列")
     except Exception as e:
         logger.warning(f"扩展 {os.path.basename(csv_file)} 列数时出错：{e}")

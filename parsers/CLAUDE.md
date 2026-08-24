@@ -33,7 +33,7 @@
 | `parse_agency_data(soup, year_month, logger)` | `table_clf1` — 经纪机构排行（按表头文本定位列 `_column_map`，页面删"发布套数"列后存 -1） | `agency_monthly.csv` |
 | `parse_district_data(soup, year_month, logger)` | `table_clf2` — 区县签约分布 | `district_monthly.csv` |
 | `parse_area_data(soup, year_month, logger)` | `table_clf3` — 面积区间分布（按表头文本定位行，勿改回位置索引；含发布侧两列，早期 -1 占位） | `area_monthly.csv` |
-| `parse_price_data(soup, year_month, logger)` | `table_clf4` — 价格区间分布 | `price_monthly.csv` |
+| `parse_price_data(soup, year_month, logger)` | `table_clf4` — 价格区间分布（与面积表同族，按表头文本定位行） | `price_monthly.csv` |
 | `parse_month_summary(soup, logger)` | 月度存量房网上签约汇总表 | `resale_monthly.csv` |
 | `parse_five_year_commercial(soup, logger)` | `table_001` — 近五年新建商品房 | `new_5year.csv` |
 | `parse_five_year_existing(soup, logger)` | `table_002` — 近五年存量房 | `resale_5year.csv` |
