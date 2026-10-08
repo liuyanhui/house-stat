@@ -34,4 +34,4 @@ python script/gen_html.py --md in.md --out out.html
 
 ### `gen_ai_digest.py`
 
-导出 AI 客观分析输入：从数据算客观事实 digest + 可粘贴 prompt，写 `report/ai_digest.md`（不含价格、不含预测）。整篇复制粘贴给 LLM 即得客观视角叙述。**手动运行、不进自动化流程。**
+导出 AI 客观分析输入：从数据算客观事实 digest + 可粘贴 prompt，写 `report/ai_digest.md`（digest 不含价格、不含预测；prompt 要求 AI 按资深分析师纪律做预判）。整篇复制粘贴给 LLM 即得客观叙述 + 预判。**手动运行、不进自动化流程。**

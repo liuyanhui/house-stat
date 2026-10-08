@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """导出 AI 分析输入（客观 digest + 可粘贴 prompt）。
 
-输出 report/ai_digest.md：整篇复制粘贴给 LLM 即可得到客观视角分析。
-不含价格、不含预测。用法:
+输出 report/ai_digest.md：整篇复制粘贴给 LLM，得到客观事实叙述 + 资深视角预判。
+digest 不含价格、不含预测；预判由 AI 按 prompt 内分析师纪律生成（判断非事实）。用法:
   python script/gen_ai_digest.py
   python script/gen_ai_digest.py --out /path/to/ai_digest.md
 """

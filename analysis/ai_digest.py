@@ -3,7 +3,8 @@
 
 设计原则（与项目可靠性一致）：
   - 代码拥有数字：本模块从 load/metrics 确定性计算全部事实，AI 只能引用此处数字。
-  - 仅客观视角、不含价格（price_monthly 完全不读）、不含预测。
+  - digest 部分仅客观事实：不含价格（price_monthly 完全不读）、不含预测；
+    prompt 部分要求 AI 按资深分析师纪律做短 horizon 预判（判断、非事实）。
   - 输出单个 markdown 文件（report/ai_digest.md），整篇复制粘贴给 LLM 即可。
 
 用法：python script/gen_ai_digest.py
@@ -136,9 +137,7 @@ def build_digest_text():
     aua = metrics.avg_unit_area(monthly)
     weekly = metrics.weekly_aggregate(daily) if not daily.empty else pd.DataFrame()
 
-    n_m = len(monthly)
-    n_d = district['period'].nunique() if not district.empty else 0
-    n_a = area['period'].nunique() if not area.empty else 0
+    n_m, n_d, n_a = _coverage_counts(monthly, district, area)
     span_m = f"{_period_label(monthly['period'].min())} ~ {_period_label(monthly['period'].max())}"
     span_d = (f"{_period_label(district['period'].min())} ~ {_period_label(district['period'].max())}"
               if not district.empty else '—')
@@ -247,11 +246,14 @@ PROMPT_TEMPLATE = """# 任务
 """
 
 
-def _coverage_counts():
-    """返回 (月度月数, 区县月数, 面积段月数)，供 prompt 模板填充。"""
-    monthly = load.load_monthly()
-    district = load.load_district()
-    area = load.load_area()
+def _coverage_counts(monthly=None, district=None, area=None):
+    """返回 (月度月数, 区县月数, 面积段月数)——prompt 模板与 digest 共用的唯一计数实现。
+
+    参数可传入已加载的 DataFrame（避免重复读 CSV），缺省时自行加载。
+    """
+    monthly = monthly if monthly is not None else load.load_monthly()
+    district = district if district is not None else load.load_district()
+    area = area if area is not None else load.load_area()
     return (len(monthly),
             district['period'].nunique() if not district.empty else 0,
             area['period'].nunique() if not area.empty else 0)
@@ -260,7 +262,11 @@ def _coverage_counts():
 def build_prompt():
     """返回完整可粘贴文本 = 指令 + digest。"""
     n_m, n_d, n_a = _coverage_counts()
-    return PROMPT_TEMPLATE.format(n_m=n_m, n_d=n_d, n_a=n_a) + build_digest_text() + '\n'
+    # 模板是自然语言，用 replace 而非 format：将来模板里出现字面 { } 不会 KeyError
+    filled = (PROMPT_TEMPLATE.replace('{n_m}', str(n_m))
+                             .replace('{n_d}', str(n_d))
+                             .replace('{n_a}', str(n_a)))
+    return filled + build_digest_text() + '\n'
 
 
 def render_file(out_path=None):
