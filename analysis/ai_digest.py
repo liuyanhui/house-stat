@@ -186,7 +186,8 @@ def build_digest_text():
     L.append('')
 
     L.append('## 必须在叙述中体现的局限')
-    L.append("- 月度仅 17 个月、区县 6 个月、面积段 5 个月且缺 2026-04：趋势判断须谨慎，多用\"样本有限/尚不能确认\"等限定。")
+    L.append(f"- 月度仅 {n_m} 个月、区县 {n_d} 个月、面积段 {n_a} 个月且缺 2026-04：趋势判断须谨慎，"
+             "多用\"样本有限/尚不能确认\"等限定。")
     L.append("- 2 月为春节季节性塌量（非趋势拐点）；3 月、年末通常冲量。区分\"趋势\"与\"季节性\"。")
     L.append("- **无价格数据**：不得谈论价格涨跌、贵贱、 affordability。")
     L.append("- **预判纪律**：可对未来 1–3 个月做预判，但须区分事实与判断、给方向+幅度区间+置信度+证伪条件、"
@@ -195,14 +196,14 @@ def build_digest_text():
     return '\n'.join(L)
 
 
-PROMPT_INSTRUCTIONS = """# 任务
+PROMPT_TEMPLATE = """# 任务
 
 你是一名**资深的**北京二手住宅市场分析师/咨询专家。请基于下方"数据摘要"，写一份市场趋势分析：前半客观陈述已发生的成交走势，后半以资深视角给出**前瞻预判**。供报告读者理解"北京二手住宅成交在怎么走、接下来可能怎么走"。
 
 # 硬性规则（必须遵守）
 
 1. **事实只引用摘要中出现的数字**，不得编造、不得自行推算新数字、不得引用外部信息。预判可以外推方向，但所依据的事实必须来自摘要。
-2. **薄数据必须 hedge**：区县仅 6 个月、面积段仅 5 个月且缺 2026-04、月度仅 17 个月——涉及这些的判断要加限定（"样本有限""尚不能确认趋势"）。
+2. **薄数据必须 hedge**：区县仅 {n_d} 个月、面积段仅 {n_a} 个月且缺 2026-04、月度仅 {n_m} 个月——涉及这些的判断要加限定（"样本有限""尚不能确认趋势"）。
 3. **区分趋势与季节性**：2 月塌量是春节季节性、非拐点；3 月/年末冲量亦属季节性。不要把季节性误读为趋势转折。
 4. **可做预判，按资深分析师/咨询专家纪律**：
    - 明确区分「事实」（须来自摘要数字）与「判断/预判」（你的外推）。
@@ -231,7 +232,7 @@ PROMPT_INSTRUCTIONS = """# 任务
 （2–4 句：套均面积走向、面积段占比迁移——成交往哪段集中；标注样本有限）
 
 ### 四、区域格局（事实）
-（2–4 句：哪些区走强/走弱、份额与排名变化；标注仅 6 个月）
+（2–4 句：哪些区走强/走弱、份额与排名变化；标注仅 {n_d} 个月）
 
 ### 五、历史坐标与局限（事实）
 （2–3 句：放到年度/上半年锚点里的位置；列出数据局限：样本短、缺 2026-04、无价格）
@@ -246,9 +247,20 @@ PROMPT_INSTRUCTIONS = """# 任务
 """
 
 
+def _coverage_counts():
+    """返回 (月度月数, 区县月数, 面积段月数)，供 prompt 模板填充。"""
+    monthly = load.load_monthly()
+    district = load.load_district()
+    area = load.load_area()
+    return (len(monthly),
+            district['period'].nunique() if not district.empty else 0,
+            area['period'].nunique() if not area.empty else 0)
+
+
 def build_prompt():
     """返回完整可粘贴文本 = 指令 + digest。"""
-    return PROMPT_INSTRUCTIONS + build_digest_text() + '\n'
+    n_m, n_d, n_a = _coverage_counts()
+    return PROMPT_TEMPLATE.format(n_m=n_m, n_d=n_d, n_a=n_a) + build_digest_text() + '\n'
 
 
 def render_file(out_path=None):
