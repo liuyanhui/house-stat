@@ -51,6 +51,9 @@ def generate():
     price = load.load_price()
     daily = load.load_daily()
 
+    # 覆盖月数（metrics.coverage_counts 为 report 与 ai_digest 共用实现）
+    n_months, n_dist_months, n_area_months = metrics.coverage_counts(monthly, district, area)
+
     if monthly.empty:
         raise RuntimeError('无月度数据，无法生成报告')
 
@@ -166,7 +169,6 @@ def generate():
 
     # 区域格局
     md.append('\n## 四、区域格局\n')
-    n_dist_months = district['period'].nunique() if not district.empty else 0
     md.append(f'> 区县月度数据仅 {n_dist_months} 个月（{district["period"].min() if not district.empty else "—"} ~ '
               f'{district["period"].max() if not district.empty else "—"}），呈现短期格局，趋势需更长序列确认。\n')
     if imgs.get('d_stack'):
@@ -189,7 +191,6 @@ def generate():
     # 市场结构
     md.append('\n## 五、市场结构\n')
     if not area.empty:
-        area_months = area['period'].nunique()
         md.append('### 面积段成交量（月度）\n')
         if imgs.get('area_cnt'):
             md.append(f'![面积段成交量]({imgs["area_cnt"]})\n')
@@ -197,7 +198,7 @@ def generate():
         if imgs.get('area_sh'):
             md.append(f'![面积段占比]({imgs["area_sh"]})\n')
         md.append(f'\n*占比视角剥离总量波动（如 2 月春节全线塌量），更能看出结构迁移。'
-                  f'当前 {area_months} 个月（2026-04 不可补、缺失），序列不连续。*\n')
+                  f'当前 {n_area_months} 个月（2026-04 不可补、缺失），序列不连续。*\n')
 
         # 各面积段 × 月份 占比表 + 占比变化(pp)
         order = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
@@ -228,16 +229,14 @@ def generate():
     # 数据说明 + 参考锚点
     md.append('\n## 六、数据说明\n')
     md.append('- **主数据**：全部来自北京市住建委（pageId=307749）官方自爬，经完整性校验（面积/价格段加总=全市）。\n')
-    md.append(f'- **月度覆盖**：{span}（{len(monthly)} 个月）。区县 {n_dist_months} 个月。'
-              f'面积段 {area["period"].nunique() if not area.empty else 0} 个月（序列不连续）。\n')
+    md.append(f'- **月度覆盖**：{span}（{n_months} 个月）。区县 {n_dist_months} 个月。'
+              f'面积段 {n_area_months} 个月（序列不连续）。\n')
     md.append('- **面积段 2026-04 永久缺失**：2026-03 已从 git 历史快照恢复；但 2026-04 的各面积段明细'
               '因解析器时间窗口 bug 永久丢失（4 月数据 5 月才上线，恰在解析器改版失效之后），'
               '官方无回溯、日数据无面积段拆分，无法恢复。全市总量（19784 套）仍可在区县数据中查到。\n')
-    md.append('- **日度估算日**（非真实观测，引用单日值须注明）：2026-07-25/26 官方故障缺失，按 7 月月度回推'
-              '（签约 154/154、住宅 147/146 套，签约面积 13,715.98、住宅面积 13,429.49/日）；'
-              '2026-09-16 抓取缺失，按 9 月月度减其余 29 日之和回推（签约 779 套/68,450.30 m²、'
-              '住宅 704 套/64,185.35 m²）。估算仅存在于日/周粒度（如 9/14 周 4,257 套含估算 704），'
-              '月度序列均为官方观测。\n')
+    md.append('- **日度估算日**（非真实观测，引用单日值须注明）：'
+              + '；'.join(f'{d} {desc}' for d, desc in load.ESTIMATED_DAYS.items())
+              + '。估算仅存在于日/周粒度（如 9/14 周 4,257 套含估算 704），月度序列均为官方观测。\n')
     md.append('- **价格段**：官方近月仅发布成交数据（发布数据全为占位）、且仅 3 个月，不足以呈现趋势，已从报告中移除。\n')
     md.append('- **不含预测**：本报告仅呈现历史趋势，不预测未来。\n')
     md.append('- **历史数据**：官方无历史月度回溯接口；第三方历史因口径/可靠性未纳入主序列。\n')

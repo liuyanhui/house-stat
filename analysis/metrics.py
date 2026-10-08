@@ -104,3 +104,10 @@ def weekly_aggregate(daily):
     g['套均面积'] = np.where(g['套数'] > 0, g['面积'] / g['套数'], np.nan)
     g['MA4'] = g['套数'].rolling(4, min_periods=1).mean()
     return g.reset_index(drop=True)
+
+
+def coverage_counts(monthly, district, area):
+    """数据覆盖月数 (月度, 区县, 面积段)——report 与 ai_digest 共用的唯一计数实现。"""
+    return (len(monthly),
+            district['period'].nunique() if not district.empty else 0,
+            area['period'].nunique() if not area.empty else 0)

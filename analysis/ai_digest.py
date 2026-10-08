@@ -124,12 +124,15 @@ def _area_block(area):
     return '\n'.join(lines)
 
 
-def build_digest_text():
-    """计算并返回"客观事实 digest"文本（不含价格、不含预测）。"""
-    monthly = load.load_monthly()
+def build_digest_text(monthly=None, district=None, area=None):
+    """计算并返回"客观事实 digest"文本（不含价格、不含预测）。
+
+    参数可传入已加载的 DataFrame（build_prompt 一次加载后复用），缺省时自行加载。
+    """
+    monthly = monthly if monthly is not None else load.load_monthly()
     annual = load.load_annual()
-    district = load.load_district()
-    area = load.load_area()
+    district = district if district is not None else load.load_district()
+    area = area if area is not None else load.load_area()
     daily = load.load_daily()
 
     monthly_yoy = metrics.add_yoy_mom(monthly)
@@ -187,6 +190,8 @@ def build_digest_text():
     L.append('## 必须在叙述中体现的局限')
     L.append(f"- 月度仅 {n_m} 个月、区县 {n_d} 个月、面积段 {n_a} 个月且缺 2026-04：趋势判断须谨慎，"
              "多用\"样本有限/尚不能确认\"等限定。")
+    L.append("- 周度/日度数字含估算日（非真实观测，引用须注明为估算）："
+             + '；'.join(f"{d} {desc}" for d, desc in load.ESTIMATED_DAYS.items()) + "。")
     L.append("- 2 月为春节季节性塌量（非趋势拐点）；3 月、年末通常冲量。区分\"趋势\"与\"季节性\"。")
     L.append("- **无价格数据**：不得谈论价格涨跌、贵贱、 affordability。")
     L.append("- **预判纪律**：可对未来 1–3 个月做预判，但须区分事实与判断、给方向+幅度区间+置信度+证伪条件、"
@@ -247,26 +252,28 @@ PROMPT_TEMPLATE = """# 任务
 
 
 def _coverage_counts(monthly=None, district=None, area=None):
-    """返回 (月度月数, 区县月数, 面积段月数)——prompt 模板与 digest 共用的唯一计数实现。
+    """返回 (月度月数, 区县月数, 面积段月数)，供 prompt 模板填充。
 
-    参数可传入已加载的 DataFrame（避免重复读 CSV），缺省时自行加载。
+    参数可传入已加载的 DataFrame（避免重复读 CSV），缺省时自行加载；
+    计数逻辑复用 metrics.coverage_counts（与 report.py 同源）。
     """
     monthly = monthly if monthly is not None else load.load_monthly()
     district = district if district is not None else load.load_district()
     area = area if area is not None else load.load_area()
-    return (len(monthly),
-            district['period'].nunique() if not district.empty else 0,
-            area['period'].nunique() if not area.empty else 0)
+    return metrics.coverage_counts(monthly, district, area)
 
 
 def build_prompt():
-    """返回完整可粘贴文本 = 指令 + digest。"""
-    n_m, n_d, n_a = _coverage_counts()
+    """返回完整可粘贴文本 = 指令 + digest。一次加载，计数与 digest 复用同一份数据。"""
+    monthly = load.load_monthly()
+    district = load.load_district()
+    area = load.load_area()
+    n_m, n_d, n_a = _coverage_counts(monthly, district, area)
     # 模板是自然语言，用 replace 而非 format：将来模板里出现字面 { } 不会 KeyError
     filled = (PROMPT_TEMPLATE.replace('{n_m}', str(n_m))
                              .replace('{n_d}', str(n_d))
                              .replace('{n_a}', str(n_a)))
-    return filled + build_digest_text() + '\n'
+    return filled + build_digest_text(monthly, district, area) + '\n'
 
 
 def render_file(out_path=None):
