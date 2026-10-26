@@ -262,9 +262,9 @@ def test_html_render_nojs_fallback():
 def test_html_render_comment_passthrough_and_toc():
     """T1.6：HTML 注释直通不被转义；<!-- toc --> 生成计数器 id 目录。"""
     from analysis import html_render as hr
-    md = '# T\n\n<!-- kpi -->\n\n<!-- toc -->\n\n## 一、A\n\ntext\n\n### 小节\n'
+    md = '# T\n\n<!-- keep -->\n\n<!-- toc -->\n\n## 一、A\n\ntext\n\n### 小节\n'
     html = hr.md_to_html(md)
-    assert '<!-- kpi -->' in html and '&lt;!--' not in html
+    assert '<!-- keep -->' in html and '&lt;!--' not in html
     assert '<nav class="toc">' in html and 'href="#sec-0"' in html
     assert '<h2 id="sec-0"' in html and '<h3 id="sec-1"' in html
 
@@ -476,11 +476,11 @@ def test_kpi_cards_render():
         with open(os.path.join(tmp, 'kpi.json'), 'w', encoding='utf-8') as f:
             _json.dump(kpi, f, ensure_ascii=False)
         html = hr.md_to_html('# T\n\n<!-- kpi -->\n', kpi_path=os.path.join(tmp, 'kpi.json'))
-        assert 'kpi-grid' in html and '15,756' in html and '+13.7%' in html
+        assert 'class="kpi-grid"' in html and '15,756' in html and '+13.7%' in html
         assert '当月至今·非全月' in html and '勿与完整月直接比较' in html
         assert '<!-- kpi -->' not in html
         html2 = hr.md_to_html('# T\n\n<!-- kpi -->\n', kpi_path=os.path.join(tmp, 'nope.json'))
-        assert '<!-- kpi -->' not in html2 and 'kpi-grid' not in html2
+        assert '<!-- kpi -->' not in html2 and 'class="kpi-grid"' not in html2
 
 
 def test_verify_kpi_branch():
