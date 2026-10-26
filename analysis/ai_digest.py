@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 import config
+import quality
 from . import load, metrics
 
 
@@ -186,7 +187,7 @@ def build_digest_text(monthly=None, district=None, area=None):
     L.append(f"- 月度仅 {n_m} 个月、区县 {n_d} 个月、面积段 {n_a} 个月且缺 2026-04：趋势判断须谨慎，"
              "多用\"样本有限/尚不能确认\"等限定。")
     L.append("- 周度/日度数字含估算日（非真实观测，引用须注明为估算）："
-             + '；'.join(f"{d} {desc}" for d, desc in load.ESTIMATED_DAYS.items()) + "。")
+             + '；'.join(f"{d} {desc}" for d, desc in quality.ESTIMATED_DAYS.items()) + "。")
     L.append("- 2 月为春节季节性塌量（非趋势拐点）；3 月、年末通常冲量。区分\"趋势\"与\"季节性\"。")
     L.append("- **无价格数据**：不得谈论价格涨跌、贵贱、 affordability。")
     L.append("- **预判纪律**：可对未来 1–3 个月做预判，但须区分事实与判断、给方向+幅度区间+置信度+证伪条件、"

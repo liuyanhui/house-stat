@@ -14,18 +14,13 @@ import os
 import pandas as pd
 import config
 
+from quality import KNOWN_ISSUES  # 单一来源在根 quality.py（2026-10-26 迁出）
+
 # 校验阈值
 THRESHOLD = 0.05  # 5%（分段加总 vs 全市）
 
 # 日月对账阈值：实测完整覆盖月份偏差 ≤0.02%（官方微调），0.5% 留余量
 DAILY_MONTH_TOLERANCE = 0.005
-
-# 已知历史数据异常（首爬即如此、无原始页面可考，白名单放行不算失败）。
-# 数据修复前保持登记，避免存量异常卡死校验门。
-KNOWN_ISSUES = {
-    ('2025-01', '住宅签约面积>网上签约面积'):
-        '网上签约面积 125475.17 < 住宅签约面积 1169916.55，疑为官方发布或首爬解析异常',
-}
 
 
 def _clean_district_name(s):

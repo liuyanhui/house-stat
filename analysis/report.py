@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 
 import config
+import quality
 from . import load, metrics, plots
 
 
@@ -224,7 +225,7 @@ def generate():
               '因解析器时间窗口 bug 永久丢失（4 月数据 5 月才上线，恰在解析器改版失效之后），'
               '官方无回溯、日数据无面积段拆分，无法恢复。全市总量（19784 套）仍可在区县数据中查到。\n')
     md.append('- **日度估算日**（非真实观测，引用单日值须注明）：'
-              + '；'.join(f'{d} {desc}' for d, desc in load.ESTIMATED_DAYS.items())
+              + '；'.join(f'{d} {desc}' for d, desc in quality.ESTIMATED_DAYS.items())
               + '。估算仅存在于日/周粒度（如 9/14 周 4,257 套含估算 704），月度序列均为官方观测。\n')
     md.append('- **价格段**：官方近月仅发布成交数据（发布数据全为占位）、且仅 3 个月，不足以呈现趋势，已从报告中移除。\n')
     md.append('- **不含预测**：本报告仅呈现历史趋势，不预测未来。\n')
