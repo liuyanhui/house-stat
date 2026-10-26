@@ -9,8 +9,9 @@
 ```bash
 pip install -r requirements.txt
 python main.py                      # 抓取最新数据（含完整性校验门，失败非零退出）
-python script/analyze.py --report   # 生成趋势报告（report/ 下 md + html + png），完成后自动在浏览器打开 HTML；一键入口 report.bat
+python script/analyze.py --report   # 生成趋势报告（report/ 下 md + 交互 html + png + charts/*.json + kpi.json），渲染→verify门→自动开浏览器；失败隔离 *.bad 非零退出；一键入口 report.bat
 python script/validate.py           # 独立数据完整性校验
+py -3.14 tests/run_tests.py         # 全套测试（换机冷启动先跑这个，全绿为准）
 python script/gen_html.py           # 单独把 trend_report.md 转成自包含 html
 python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（report/ai_digest.md，手动喂 LLM）
 ```
@@ -34,7 +35,8 @@ script/analyze.py --report → analysis.load → metrics(口径防护) → chart
 | `data/` | 官方自爬 CSV（可靠基准，逐月累积）；`raw/` 存原始 HTML（不进 git） | ✓（raw/ 除外） |
 | `parsers/` | HTML→DataFrame 解析器 | ✓ |
 | `utils/` | 抓取/存储/校验/日志/目录 | ✓ |
-| `analysis/` | 趋势分析包（load/metrics/plots/report/html_render/ai_digest） | ✓ |
+| `analysis/` | 趋势分析包（load/metrics/charts/report/html_render/verify/ai_digest） | ✓ |
+| `docs/` | 升级项目文档：需求 v0.3 / 设计 v1.1 / 开发计划 v1.1 / **HANDOFF.md（换机冷启动入口）** | ✓ |
 | `script/` | 入口脚本（analyze/gen_html/gen_ai_digest/validate） | ✓ |
 | `tests/` | 测试骨架 run_tests.py + fixtures 合成样本 + 基线/像素 diff 工具（`PYTHONPATH= py -3.14 tests/run_tests.py`） | ✓ |
 | `assets/vendor/` | 第三方前端依赖原样入库（echarts.min.js 5.6.0，版本+sha256 见其 README.txt，永不手改） | ✓ |
@@ -71,8 +73,9 @@ script/analyze.py --report → analysis.load → metrics(口径防护) → chart
 
 ## 路线图
 
+- **交互式报告升级（进行中）**：M0/M1 完成（tag m0/m1），M2 完成 3/7。**当前入口与续作步骤见 `docs/HANDOFF.md`**；工作流约定：每个关键步骤完成后并行多角色评审（智能体分批 3+2 防 429），评审通过才进下一步。
 - **AI 叙述层**：已落地 `analysis/ai_digest.py` + `script/gen_ai_digest.py`，导出 `report/ai_digest.md` 手动喂 LLM；AI 不进 cron（"代码拥有数字，AI 只拥有叙述"）。
-- **新房（new_*）联动分析**：new_daily 仅 ~3 个月，待累积。
+- **新房（new_*）联动分析**：new_daily 认购/签约字段 2026-08-23 起全量，M3 R1 将落地（含去化周期）。
 - **面积段/区县长历史**：随 main.py 每月自动累积变厚。
 - **预测**：确定性报告（trend_report）明确不做；预判只在 ai_digest 层。
-- **自动化测试**：无 pytest。页面改版时可用 `data/raw/` 存档回放验证解析器（对照页面实测值逐字段断言），可把该做法收编为 `tests/`。
+- **自动化测试**：已落地 `tests/run_tests.py`（零依赖，23 用例）+ fixtures 合成样本 + 基线/像素 diff 工具；页面改版时可用 `data/raw/` 存档回放验证解析器。
