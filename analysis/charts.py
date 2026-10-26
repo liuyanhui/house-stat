@@ -104,6 +104,8 @@ def _ec_line(s, **extra):
         'itemStyle': {'color': s.get('color', PALETTE['line_main'])},
         'connectNulls': False,   # 断档/缺月必须断线（需求 §5.2）
     }
+    if s.get('alpha') is not None:
+        ser['lineStyle']['opacity'] = s['alpha']
     ser.update(extra)
     return ser
 
@@ -123,8 +125,9 @@ def _ec_base(spec, tooltip_trigger):
 def _ec_bars_lines(spec):
     opt = _ec_base(spec, 'axis')
     opt['xAxis'] = [{'type': 'category', 'data': spec['x']['labels'],
-                     'axisLabel': {'rotate': spec['x'].get('rot', 0), 'fontSize': 10},
-                     'boundaryGap': True}]
+                     'axisLabel': {'rotate': spec['x'].get('rot', 0),
+                                   'fontSize': spec['x'].get('fontsize', 10)},
+                     'boundaryGap': spec['kind'] != 'lines'}]
     step = int(spec['x'].get('tick_step', 1))
     if step > 1:
         opt['xAxis'][0]['axisLabel']['interval'] = step - 1
@@ -139,6 +142,8 @@ def _ec_bars_lines(spec):
         if s['type'] == 'bar':
             ser = {'type': 'bar', 'name': s.get('name', ''), 'data': _ec_bar_data(s),
                    'itemStyle': {'opacity': s.get('alpha', 1)}}
+            if s.get('color') and not (s.get('sign_color') or s.get('colors')):
+                ser['itemStyle']['color'] = s['color']   # 纯色柱不能丢（默认蓝陷阱）
             if s.get('width'):
                 ser['barWidth'] = f"{s['width'] * 100}%"
             if s.get('axis') == 'right':
@@ -434,8 +439,13 @@ def to_matplotlib(spec, out_dir=None):
 # 序列在此算好（双 sink 只画不算）。视觉参数与旧 plots.py 对齐，迁移期用
 # 像素 diff（tests/pixel_diff.py）对照旧图，超容差人工复核记录。
 def _period_labels(periods):
-    """Period[M] 列表 → '25-01' 风格标签（与旧 plots.py 一致）。"""
-    return [f"{str(p)[2:5]}-{str(p)[5:7]}" for p in periods]
+    """Period[M] 列表 → '25-01' 风格标签。
+
+    注意切片：str(p)[2:5] 会带上第 4 位的 '-'（旧 plots.py 的继承 bug，标签成
+    '25--01'），此处修复为 [2:4]+[5:7]；修复会引入与旧基线的标签行像素差，
+    属记录在案的修复性差异。
+    """
+    return [f"{str(p)[2:4]}-{str(p)[5:7]}" for p in periods]
 
 
 def prep_city_trend(monthly_ma):
