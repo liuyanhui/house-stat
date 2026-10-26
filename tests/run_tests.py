@@ -72,6 +72,31 @@ def test_quality_single_source():
     assert '2026-09-16' in meta_d['resale_daily']['estimated_days']
 
 
+def test_load_new_daily_column_level():
+    """T1.2：new_daily 列级清洗——库存列全程有效，签约列 8-23 前为 NaN（禁行级过滤）。"""
+    from analysis import load
+    with tempfile.TemporaryDirectory() as tmp:
+        make_fixtures.write_short_new(tmp)
+        n = load.load_new_daily(data_dir=tmp)
+        assert len(n) == 61
+        assert n['可售期房住宅套数'].notna().all()          # 库存列 8-23 前也有值
+        before = n[n['日期'] < '2026-08-23']
+        after = n[n['日期'] >= '2026-08-23']
+        assert before['期房签约住宅套数'].isna().all()      # 签约列占位→NaN
+        assert after['期房签约住宅套数'].notna().all()
+
+
+def test_load_agency_gap():
+    """T1.2：agency 载入弃发布套数列、断档月自然缺席（2026-05/06）。"""
+    from analysis import load
+    with tempfile.TemporaryDirectory() as tmp:
+        make_fixtures.write_agency_gap(tmp)
+        a = load.load_agency(data_dir=tmp)
+        assert '发布套数' not in a.columns
+        assert set(a['period'].astype(str)) == {'2026-04', '2026-07', '2026-08'}
+        assert len(a) == 9
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
