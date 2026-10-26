@@ -22,7 +22,9 @@ python script/gen_ai_digest.py      # 导出 AI 客观分析 digest+prompt（rep
 ```
 main.py → fetcher(存档 data/raw/) → parsers → storage(去重写 data/*.csv)
         → check_monthly_feeds(断流门) → validate_integrity(校验门) → check_daily_freshness(滞后告警)
-script/analyze.py --report → analysis.load → metrics → plots(PNG) → report(md) → html_render(html)
+script/analyze.py --report → analysis.load → metrics(口径防护) → charts(PNG + charts/*.json)
+        → report(md) → html_render(html，图表交互注入/目录/NO_JS退化)
+        → verify 门(锚点独立重算/成对契约/体积门；失败隔离 *.bad 非零退出) → 开浏览器
 ```
 
 ## 目录
@@ -34,6 +36,7 @@ script/analyze.py --report → analysis.load → metrics → plots(PNG) → repo
 | `utils/` | 抓取/存储/校验/日志/目录 | ✓ |
 | `analysis/` | 趋势分析包（load/metrics/plots/report/html_render/ai_digest） | ✓ |
 | `script/` | 入口脚本（analyze/gen_html/gen_ai_digest/validate） | ✓ |
+| `tests/` | 测试骨架 run_tests.py + fixtures 合成样本 + 基线/像素 diff 工具（`PYTHONPATH= py -3.14 tests/run_tests.py`） | ✓ |
 | `assets/vendor/` | 第三方前端依赖原样入库（echarts.min.js 5.6.0，版本+sha256 见其 README.txt，永不手改） | ✓ |
 | `report/` | 报告产物（md+html+png，代码生成） | ✗ 已忽略，每次重生 |
 | `log/` | 运行日志 | ✗ 已忽略 |

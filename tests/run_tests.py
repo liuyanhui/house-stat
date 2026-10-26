@@ -269,6 +269,49 @@ def test_html_render_comment_passthrough_and_toc():
     assert '<h2 id="sec-0"' in html and '<h3 id="sec-1"' in html
 
 
+def test_verify_gate():
+    """T1.7：验收门——锚点独立重算（CSV 直读 vs 图表 JSON/md），坏值被抓住。"""
+    import json as _json
+    import os
+    from analysis import verify
+
+
+    def build(tmp, last_units, tamper=None):
+        os.makedirs(os.path.join(tmp, 'charts'), exist_ok=True)
+        for stem in verify.CHART_STEMS:
+            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
+                f.write(b'x')
+            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
+                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
+                            'option': {'series': []}}, f)
+        city = {'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
+                'option': {'series': [{'type': 'bar', 'data': [1, last_units]}]}}
+        if tamper == 'nan':
+            with open(os.path.join(tmp, 'charts', 'city_trend.json'), 'w', encoding='utf-8') as f:
+                f.write('{"option": {"series": [{"data": [1, NaN]}]}}')
+        else:
+            with open(os.path.join(tmp, 'charts', 'city_trend.json'), 'w', encoding='utf-8') as f:
+                _json.dump(city, f, ensure_ascii=False)
+        with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
+            f.write(f'最新月 {last_units:,} 套')
+        with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('<script id="chart-data"></script>')
+
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data:
+        with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
+                    '2026-08,1,1,1,1\n2026-09,2,2,12345,2\n')
+        build(tmp, 12345)
+        ok, issues = verify.check(tmp, data)
+        assert ok, issues                       # 全对 → 过
+        build(tmp, 99999)                       # 锚点错 → 抓住
+        ok, issues = verify.check(tmp, data)
+        assert not ok and any('锚点不符' in i for i in issues)
+        build(tmp, 12345, tamper='nan')         # NaN 字面量 → 抓住
+        ok, issues = verify.check(tmp, data)
+        assert not ok and any('NaN' in i for i in issues)
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())

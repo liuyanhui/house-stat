@@ -461,7 +461,11 @@ def parse_args():
 
 
 def run_report(data_dir):
-    """生成趋势报告（Markdown + PNG）。"""
+    """生成趋势报告（Markdown + PNG + 交互 HTML），顺序：渲染 → verify 门 → 打开。
+
+    verify 失败：HTML 改名 *.bad 隔离、不开浏览器、非零退出（防残缺产物
+    被当新报告；设计 v1.1 §2.8 / 开发计划 T1.7）。
+    """
     # BASE_DIR 已是项目根目录；加入 sys.path 以便导入 config / analysis 包
     if BASE_DIR not in sys.path:
         sys.path.insert(0, BASE_DIR)
@@ -470,9 +474,24 @@ def run_report(data_dir):
         config.DATA_DIR = os.path.abspath(data_dir)
     from analysis import report as report_mod
     from analysis import html_render
+    from analysis import verify
     out = report_mod.generate()
     html_path = os.path.join(config.REPORT_DIR, 'trend_report.html')
-    html_render.render_file(out, html_path)
+    no_js = os.environ.get('DASHBOARD_NO_JS') == '1'
+    html_render.render_file(out, html_path, no_js=no_js)
+
+    ok, issues = verify.check(config.REPORT_DIR, config.DATA_DIR, no_js=no_js)
+    if not ok:
+        bad = html_path + '.bad'
+        os.replace(html_path, bad)
+        print(f'✗ verify 门未过，HTML 已隔离为 {bad}', file=sys.stderr)
+        for it in issues:
+            print(f'  - {it}', file=sys.stderr)
+        sys.exit(1)
+    mode = '（NO_JS 纯图模式）' if no_js else ''
+    print(f'✓ verify 门通过：锚点独立重算 / charts-PNG 成对 / JSON 无 NaN / '
+          f'体积门 / vendor 自检{mode}')
+
     print(f'趋势报告已生成: {out}')
     print(f'HTML 报告: {html_path}')
     print(f'图表目录: {config.REPORT_DIR}')
