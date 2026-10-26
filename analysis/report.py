@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """趋势报告组装：生成 report/trend_report.md + PNG 图表。
 
-全部基于官方自爬数据。第三方媒体锚点仅作"参考"附录，明确标注非自爬。
+全部基于官方自爬数据，不引用任何第三方/媒体数据。
 无预测——只呈现历史趋势。
 """
 import os
@@ -10,17 +10,6 @@ import numpy as np
 
 import config
 from . import load, metrics, plots
-
-
-# 经 2025 口径验证的媒体锚点（非自爬，仅参考）
-# 2025 H1 = 88575 与本项目住宅签约套数加总精确吻合，口径一致
-MEDIA_H1_ANCHORS = [
-    # (年份, 上半年二手住宅网签套数, 来源类型)
-    (2022, 69754),
-    (2023, 84332),
-    (2024, 74780),
-    (2025, 88575),
-]
 
 
 def _fmt(v, spec=',.0f'):
@@ -240,12 +229,6 @@ def generate():
     md.append('- **价格段**：官方近月仅发布成交数据（发布数据全为占位）、且仅 3 个月，不足以呈现趋势，已从报告中移除。\n')
     md.append('- **不含预测**：本报告仅呈现历史趋势，不预测未来。\n')
     md.append('- **历史数据**：官方无历史月度回溯接口；第三方历史因口径/可靠性未纳入主序列。\n')
-    md.append('\n### 参考：上半年网签量长周期（媒体引用·非自爬）\n')
-    md.append('> 经 2025 年验证口径与官方一致（媒体 88575 = 本项目自爬加总）。'
-              '2022-2024 为媒体引用，仅作长周期参考，不参与主趋势计算。\n\n')
-    arows = [[y, f'{v:,}'] for y, v in MEDIA_H1_ANCHORS]
-    md.append(_table(['年份', '上半年二手住宅网签(套)'], arows))
-    md.append('')
 
     out = os.path.join(config.REPORT_DIR, 'trend_report.md')
     with open(out, 'w', encoding='utf-8') as f:
