@@ -435,6 +435,34 @@ def test_preps_smoke():
         charts.to_echarts(s)
 
 
+def test_injection_guards():
+    """T2.7：缺 option 键的 JSON 退化 PNG；行内图片注入标签不被转义。"""
+    import json as _json
+    import os
+    from analysis import html_render as hr
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, 'charts'))
+        with open(os.path.join(tmp, 'a.png'), 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n')
+        with open(os.path.join(tmp, 'charts', 'a.json'), 'w', encoding='utf-8') as f:
+            f.write('{"name":"a","kind":"lines","height":320}')   # 无 option 键
+        vendor = os.path.join(tmp, 'v.js')
+        with open(vendor, 'w', encoding='utf-8') as f:
+            f.write('/*v*/')
+        kw = dict(image_dir=tmp, charts_dir=os.path.join(tmp, 'charts'),
+                  vendor_path=vendor, no_js=False)
+        html = hr.md_to_html('![t](a.png)\n', **kw)
+        assert 'data:image/png;base64' in html and 'class="chart"' not in html
+
+        # 行内图片（段中）：正常 option → 注入标签且不被转义成可见文本
+        with open(os.path.join(tmp, 'charts', 'a.json'), 'w', encoding='utf-8') as f:
+            _json.dump({'name': 'a', 'kind': 'lines', 'height': 320,
+                        'option': {'series': [{'type': 'line', 'data': [1]}]}}, f)
+        html = hr.md_to_html('前文 ![t](a.png) 后文\n', **kw)
+        assert '<div class="chart"' in html and '&lt;div' not in html
+        assert 'data-chart="a"' in html
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())

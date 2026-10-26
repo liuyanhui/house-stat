@@ -157,10 +157,12 @@ def _img_tag(alt, src, image_dir, charts_ctx=None):
             try:
                 with open(cjson, encoding='utf-8') as f:
                     payload = json.load(f)
-                charts_ctx['found'][stem] = payload.get('option', {})
-                h = int(payload.get('height') or 400)
-                return (f'<div class="chart" data-chart="{_html.escape(stem)}" '
-                        f'style="height:{h}px"></div>')
+                option = payload.get('option')
+                if option:  # 缺 option 键/空 option → 视为坏 JSON 走 PNG（M2 修复）
+                    charts_ctx['found'][stem] = option
+                    h = int(payload.get('height') or 400)
+                    return (f'<div class="chart" data-chart="{_html.escape(stem)}" '
+                            f'style="height:{h}px"></div>')
             except (OSError, ValueError):
                 pass  # JSON 损坏 → 走 PNG 兜底（设计：缺 json/坏 json 自动退化）
     path = src
@@ -212,10 +214,14 @@ def _convert(md, image_dir, charts_ctx=None):
     lines = re.sub(r"\r\n?", "\n", md).split("\n")
     out = []
     para = []
+    img_stash = []   # 行内图片/图表标签暂存：先占位，_inline 转义后再还原（防注入标签被转义）
 
     def flush_para():
         if para:
-            out.append(f"<p>{_inline(' '.join(para))}</p>")
+            text = _inline(' '.join(para))
+            text = re.sub(r"\x00I(\d+)\x00",
+                          lambda m: img_stash[int(m.group(1))], text)
+            out.append(f"<p>{text}</p>")
             para.clear()
 
     i = 0
@@ -336,8 +342,12 @@ def _convert(md, image_dir, charts_ctx=None):
             i += 1
             continue
 
-        # 普通文本行 → 累积成段落（行内图片就地替换）
-        ln = _IMG_RE.sub(lambda m: _img_tag(m.group(1), m.group(2), image_dir, charts_ctx), line.strip())
+        # 普通文本行 → 累积成段落（行内图片/图表标签暂存，转义后还原）
+        def _stash_img(m):
+            img_stash.append(_img_tag(m.group(1), m.group(2), image_dir, charts_ctx))
+            return f"\x00I{len(img_stash) - 1}\x00"
+
+        ln = _IMG_RE.sub(_stash_img, line.strip())
         para.append(ln)
         i += 1
 
@@ -378,7 +388,7 @@ _BOOTSTRAP = """(function () {
   var inited = [];
   function init(node) {
     var key = node.getAttribute('data-chart');
-    if (!data[key]) return;
+    if (!data[key] || !data[key].series) return;
     var c = echarts.init(node);
     c.setOption(data[key]);
     inited.push(c);
