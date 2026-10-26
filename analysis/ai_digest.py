@@ -16,9 +16,6 @@ import pandas as pd
 import config
 from . import load, metrics
 
-# 经 2025 口径验证的媒体锚点（非自爬，仅客观参考）
-_H1_ANCHORS = [(2022, 69754), (2023, 84332), (2024, 74780), (2025, 88575)]
-
 
 def _f(v, spec=',.0f'):
     return '—' if pd.isna(v) else format(v, spec)
@@ -157,7 +154,7 @@ def build_digest_text(monthly=None, district=None, area=None):
     if not weekly.empty:
         L.append(f"- 周度：{weekly['week_start'].iloc[0].date()} ~ "
                  f"{weekly['week_start'].iloc[-1].date()}（{len(weekly)} 周）")
-    L.append("- 年度：2020–2024（官方）；上半年网签锚点含媒体引用（已标注）")
+    L.append("- 年度：2020–2024（官方自爬）")
     L.append("- **不含任何价格数据**\n")
 
     L.append('## 全市月度（住宅网签套数）')
@@ -183,8 +180,6 @@ def build_digest_text(monthly=None, district=None, area=None):
     L.append('## 历史坐标')
     L.append('- 年度二手住宅（万套，官方）：'
              + '、'.join(f"{int(r['年份'])}={r['住宅套数万']:.2f}" for _, r in annual.iterrows()))
-    L.append('- 上半年网签（套，**媒体引用·非自爬**）：'
-             + '、'.join(f"{y}={v:,}" for y, v in _H1_ANCHORS))
     L.append('')
 
     L.append('## 必须在叙述中体现的局限')
@@ -239,7 +234,7 @@ PROMPT_TEMPLATE = """# 任务
 （2–4 句：哪些区走强/走弱、份额与排名变化；标注仅 {n_d} 个月）
 
 ### 五、历史坐标与局限（事实）
-（2–3 句：放到年度/上半年锚点里的位置；列出数据局限：样本短、缺 2026-04、无价格）
+（2–3 句：放到年度长周期里的位置；列出数据局限：样本短、缺 2026-04、无价格）
 
 ### 六、预判（资深视角 · 判断而非事实）
 （5–7 句：未来 1–3 个月的方向+幅度区间+置信度；核心驱动机制（季节性/基数效应/动量）；情景与风险（如政策摇摆、9 月与 12 月的高基数压力）；证伪条件。明确标注这是分析师判断。）
