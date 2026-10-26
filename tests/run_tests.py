@@ -146,6 +146,72 @@ def test_expand_estimated_days():
     assert days == ['2026-07-25', '2026-07-26', '2026-09-16']
 
 
+def test_charts_engine_bars_lines():
+    """T1.4a：bars_lines 双 sink——PNG 产出、JSON 合法无 NaN 字面量、正负着色正确。"""
+    import json as _json
+    import os
+    import palette
+    from analysis import charts
+    spec = {
+        'name': 'ut_bars_lines', 'kind': 'bars_lines', 'title': '单测', 'figsize': (8, 4),
+        'x': {'labels': ['25-01', '25-02', '25-03'], 'rot': 45},
+        'left': {'label': '套数'}, 'right': {'label': '同比 %'},
+        'series': [
+            {'type': 'bar', 'name': '套数', 'values': [100.0, float('nan'), 300.0],
+             'color': palette.PALETTE['bar_main'], 'alpha': 0.55},
+            {'type': 'line', 'name': 'MA', 'values': [None, 200.0, 300.0],
+             'color': palette.PALETTE['line_ma']},
+            {'type': 'bar', 'name': '同比', 'values': [5.0, -3.0, None], 'axis': 'right',
+             'sign_color': True, 'alpha': 0.35, 'width': 0.5},
+        ],
+        'annotations': [],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        charts.write_chart(spec, out_dir=tmp)
+        assert os.path.getsize(os.path.join(tmp, 'ut_bars_lines.png')) > 0
+        text = open(os.path.join(tmp, 'charts', 'ut_bars_lines.json'), encoding='utf-8').read()
+        assert 'NaN' not in text and 'Infinity' not in text
+        data = _json.loads(text)
+        assert data['series'][0]['values'] == [100.0, None, 300.0]
+        opt = charts.to_echarts(spec)
+        assert opt['series'][2]['data'][0]['itemStyle']['color'] == palette.PALETTE['up']
+        assert opt['series'][2]['data'][1]['itemStyle']['color'] == palette.PALETTE['down']
+        assert opt['series'][2]['yAxisIndex'] == 1
+
+
+def test_charts_engine_families():
+    """T1.4a：lines/stacked_area/heatmap/smallmul 四家族双 sink 均可产出。"""
+    import os
+    from analysis import charts
+    specs = [
+        {'name': 'ut_lines', 'kind': 'lines', 'title': 't', 'figsize': (8, 3),
+         'x': {'labels': ['a', 'b', 'c']},
+         'left': {'label': 'm²'},
+         'series': [{'type': 'line', 'name': '套均', 'values': [89.0, 90.0, None], 'marker': True},
+                    {'type': 'line', 'name': '趋势', 'values': [88.5, 89.5, 90.5], 'dashed': True}]},
+        {'name': 'ut_stack', 'kind': 'stacked_area', 'title': 't', 'figsize': (8, 4),
+         'x': {'labels': ['a', 'b', 'c']}, 'left': {'label': '份额 %'}, 'y_max': 100,
+         'series': [{'name': 'A', 'values': [50.0, 40.0, 30.0]},
+                    {'name': 'B', 'values': [50.0, 60.0, 70.0]}]},
+        {'name': 'ut_heat', 'kind': 'heatmap', 'title': 't',
+         'x': {'labels': ['1月', '2月']}, 'y': {'labels': ['2025', '2026']},
+         'matrix': [[1000.0, 1200.0], [float('nan'), 1500.0]],
+         'value_fmt': 'int', 'colorbar_label': '套数'},
+        {'name': 'ut_smallmul', 'kind': 'smallmul', 'title': 't', 'ncols': 2,
+         'x': {'labels': ['a', 'b', 'c']},
+         'panels': [{'title': '朝阳', 'values': [1.0, 2.0, 3.0]},
+                    {'title': '海淀', 'values': [3.0, 2.0, 1.0]}]},
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for spec in specs:
+            charts.write_chart(spec, out_dir=tmp)
+            assert os.path.getsize(os.path.join(tmp, spec['name'] + '.png')) > 0
+            opt = charts.to_echarts(spec)   # 不抛异常即契约成立
+            assert opt['series']
+        heat_opt = charts.to_echarts(specs[2])
+        assert heat_opt['visualMap']['max'] == 1500.0
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
