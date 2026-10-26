@@ -312,6 +312,129 @@ def test_verify_gate():
         assert not ok and any('NaN' in i for i in issues)
 
 
+def test_baseline_diff_whitelist_gate():
+    """T1.8 补：白名单机制本身可测——白名单外差异必须非零退出。"""
+    import subprocess
+    import sys as _sys
+    script = os.path.join(HERE, 'baseline_diff.py')
+    with tempfile.TemporaryDirectory() as tmp:
+        base = os.path.join(tmp, 'base.md')
+        cur = os.path.join(tmp, 'cur.md')
+        wl = os.path.join(tmp, 'wl.txt')
+        with open(base, 'w', encoding='utf-8') as f:
+            f.write('a\n')
+        with open(cur, 'w', encoding='utf-8') as f:
+            f.write('a\nB2\n')   # 纯增行：diff 只有 +B2 一行
+        with open(wl, 'w', encoding='utf-8') as f:
+            f.write('B2\n')
+        r = subprocess.run([_sys.executable, script, base, cur, wl],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr      # 差异命中白名单
+        with open(wl, 'w', encoding='utf-8') as f:
+            f.write('zzz\n')
+        r = subprocess.run([_sys.executable, script, base, cur, wl],
+                           capture_output=True, text=True)
+        assert r.returncode == 1                            # 白名单外 → 非零
+        assert '>>' in r.stdout
+
+
+def test_pixel_diff_exit_codes():
+    """T1.8 补：像素 diff 三分支退出码（0 相同 / 1 超容差 / 2 尺寸不一致）。"""
+    import subprocess
+    import sys as _sys
+    from PIL import Image
+    script = os.path.join(HERE, 'pixel_diff.py')
+    with tempfile.TemporaryDirectory() as tmp:
+        p1, p2, p3, p4 = (os.path.join(tmp, n) for n in ('a.png', 'b.png', 'c.png', 'd.png'))
+        Image.new('RGB', (20, 20), (255, 255, 255)).save(p1)
+        Image.new('RGB', (20, 20), (255, 255, 255)).save(p2)
+        Image.new('RGB', (20, 20), (0, 0, 0)).save(p3)
+        Image.new('RGB', (30, 20), (255, 255, 255)).save(p4)
+
+        def run(x, y):
+            return subprocess.run([_sys.executable, script, x, y],
+                                  capture_output=True, text=True).returncode
+        assert run(p1, p2) == 0
+        assert run(p1, p3) == 1
+        assert run(p1, p4) == 2
+
+
+def test_verify_gate_branches():
+    """T1.8 补：缺 PNG / 多余 JSON / 体积门 / vendor 缺失分支。"""
+    import json as _json
+    from analysis import verify
+
+    def build(tmp):
+        os.makedirs(os.path.join(tmp, 'charts'), exist_ok=True)
+        for stem in verify.CHART_STEMS:
+            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
+                f.write(b'x')
+            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
+                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
+                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
+        with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
+            f.write('12,345')
+        with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('<script id="chart-data"></script>')
+
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data:
+        with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
+                    '2026-09,2,2,12345,2\n')
+        build(tmp)
+        ok, _ = verify.check(tmp, data)
+        assert ok
+        os.remove(os.path.join(tmp, 'seasonality.png'))
+        with open(os.path.join(tmp, 'charts', 'extra.json'), 'w', encoding='utf-8') as f:
+            f.write('{}')
+        with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('x' * (verify.HTML_SIZE_LIMIT + 1))
+        old_vendor = verify.VENDOR_PATH
+        verify.VENDOR_PATH = os.path.join(tmp, 'nope.js')
+        try:
+            ok, issues = verify.check(tmp, data)
+        finally:
+            verify.VENDOR_PATH = old_vendor
+        assert not ok
+        assert any('缺 PNG' in i for i in issues)
+        assert any('多余' in i for i in issues)
+        assert any('体积超限' in i for i in issues)
+        assert any('vendor 缺失' in i for i in issues)
+
+
+def test_vendor_missing_degrades():
+    """T1.8 补：vendor 缺失（非 NO_JS 显式开关）→ 自动退化 PNG 模式。"""
+    from analysis import html_render as hr
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, 'a.png'), 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n')
+        html = hr.md_to_html('![t](a.png)\n', image_dir=tmp,
+                             charts_dir=os.path.join(tmp, 'charts'),
+                             vendor_path=os.path.join(tmp, 'nope.js'), no_js=False)
+        assert 'data:image/png;base64' in html and 'chart-data' not in html
+
+
+def test_preps_smoke():
+    """T1.8 补：十个 prep 真实数据全量冒烟（spec 结构完整、option 可产）。"""
+    from analysis import load, metrics, charts
+    monthly = load.load_monthly()
+    monthly_ma = metrics.add_moving_avg(metrics.add_yoy_mom(monthly), windows=(12,))
+    weekly = metrics.weekly_aggregate(load.load_daily())
+    aua = metrics.avg_unit_area(monthly)
+    district, area = load.load_district(), load.load_area()
+    specs = [charts.prep_city_trend(monthly_ma), charts.prep_seasonality(monthly),
+             charts.prep_avg_area_trend(aua), charts.prep_weekly_trend(weekly),
+             charts.prep_weekly_avg_area(weekly), charts.prep_district_stacked(district),
+             charts.prep_district_share(district), charts.prep_district_smallmul(district),
+             charts.prep_area_segment_count(area), charts.prep_area_segment_share(area)]
+    assert all(s is not None for s in specs)
+    for s in specs:
+        assert s['name'] and s['kind'] in ('bars_lines', 'lines', 'stacked_area',
+                                           'heatmap', 'smallmul')
+        assert 'annotations' in s and 'title' in s
+        charts.to_echarts(s)
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
