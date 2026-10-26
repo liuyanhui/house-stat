@@ -108,4 +108,26 @@ def check(report_dir, data_dir, no_js=False):
     else:
         issues.append(f'vendor 缺失: {VENDOR_PATH}（交互模式不可用）')
 
+    # 6) kpi.json 直比（CSV 独立重算：latest=尾月套数；mtd=日度当月求和/天数）
+    kpi_path = os.path.join(report_dir, 'kpi.json')
+    if os.path.isfile(kpi_path):
+        kpi = json.loads(open(kpi_path, encoding='utf-8').read())
+        lat = kpi.get('latest') or {}
+        if lat.get('units') != units:
+            issues.append(f'kpi.json latest.units {lat.get("units")} != CSV {ym} {units}')
+        mtd = kpi.get('mtd')
+        if mtd:
+            msum, mrows = 0, 0
+            with open(os.path.join(data_dir, 'resale_daily.csv'),
+                      encoding='utf-8-sig') as f:
+                for r in csv.DictReader(f):
+                    if str(r['日期']).startswith(str(mtd.get('period', ''))):
+                        v2 = int(float(r['住宅签约套数']))
+                        if v2 > 0:
+                            msum += v2
+                            mrows += 1
+            if msum != mtd.get('units') or mrows != mtd.get('days'):
+                issues.append(f'kpi.json mtd 不符: 独立重算 {mtd.get("period")}'
+                              f'={msum}/{mrows} 天，json={mtd.get("units")}/{mtd.get("days")}')
+
     return (not issues), issues

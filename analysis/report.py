@@ -4,6 +4,7 @@
 全部基于官方自爬数据，不引用任何第三方/媒体数据。
 无预测——只呈现历史趋势。
 """
+import json
 import os
 import pandas as pd
 import numpy as np
@@ -87,6 +88,26 @@ def generate():
     avg_area_latest = aua.iloc[-1]['套均面积'] if not aua.empty else np.nan
     avg_area_first = aua.iloc[0]['套均面积'] if not aua.empty else np.nan
 
+    # KPI 数据（T2.3）：html_render 静态卡片渲染 + verify 门直比；NaN→None（JSON 合法）
+    mtd = None
+    if not daily.empty:
+        last_ym = daily['日期'].max().strftime('%Y-%m')
+        dm = daily[daily['日期'].dt.strftime('%Y-%m') == last_ym]
+        if not dm.empty:
+            mtd = {'period': last_ym, 'units': int(dm['住宅签约套数'].sum()),
+                   'days': int(len(dm)), 'note': '当月至今·非全月'}
+    kpi = {
+        'latest': {
+            'period': str(cur['period']), 'units': int(cur_units),
+            'mom': None if pd.isna(mom) else round(float(mom), 1),
+            'yoy': None if pd.isna(yoy) else round(float(yoy), 1),
+            'avg_area': None if np.isnan(avg_area_latest) else round(float(avg_area_latest), 1),
+        },
+        'mtd': mtd,
+    }
+    with open(os.path.join(config.REPORT_DIR, 'kpi.json'), 'w', encoding='utf-8') as f:
+        json.dump(kpi, f, ensure_ascii=False, allow_nan=False)
+
     md = []
     md.append('# 北京二手住宅成交趋势报告\n')
     md.append(f'> 数据范围：{span}（共 {len(monthly)} 个月）· 数据来源：北京市住建委（官方自爬）· 仅历史趋势，不含预测\n')
@@ -95,6 +116,7 @@ def generate():
 
     # 摘要
     md.append('## 一、核心摘要\n')
+    md.append('<!-- kpi -->\n')
     md.append(f'- **最新月份 {cur['period']}**：住宅网签 **{cur_units:,} 套**'
               f'，环比 {_pct(mom)}，同比 {_pct(yoy)}。\n')
     md.append(f'- **区间峰值**：{peak['period']}（{int(peak["住宅签约套数"]):,} 套）'

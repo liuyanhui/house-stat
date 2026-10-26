@@ -104,6 +104,17 @@ tbody tr:hover {{ background:var(--accent-light); }}
 .toc ul {{ margin:0.4em 0; padding-left:1.2em; }}
 .toc li {{ margin:0.25em 0; }}
 .toc li.lvl3 {{ padding-left:1.2em; }}
+/* KPI 卡（<!-- kpi --> 占位，kpi.json 构建期渲染） */
+.kpi-grid {{ display:flex; gap:14px; flex-wrap:wrap; margin:1.2em 0; }}
+.kpi-card {{ flex:1; min-width:220px; border:1px solid var(--border);
+  border-left:4px solid var(--accent); border-radius:8px; padding:12px 16px;
+  background:var(--accent-light); }}
+.kpi-card.kpi-mtd {{ border-left-color:var(--muted); }}
+.kpi-label {{ font-size:13px; color:var(--muted); }}
+.kpi-value {{ font-size:26px; font-weight:bold; color:var(--accent); line-height:1.5; }}
+.kpi-card.kpi-mtd .kpi-value {{ color:var(--fg); }}
+.kpi-unit {{ font-size:14px; }}
+.kpi-sub {{ font-size:13px; }}
 @media (max-width:640px) {{
   .container {{ padding:20px 14px 60px; }}
   th,td {{ white-space:normal; }}
@@ -413,24 +424,57 @@ _BOOTSTRAP = """(function () {
 })();"""
 
 
+def _kpi_cards(kpi):
+    """kpi.json → 静态 HTML 卡片（构建期渲染，无 JS，交互/纯图两模式通用）。"""
+    def pct(v):
+        return f'{v:+.1f}%' if isinstance(v, (int, float)) else '—'
+
+    cards = []
+    lat = kpi.get('latest') or {}
+    if lat:
+        sub = (f'住宅网签 · 环比 {pct(lat.get("mom"))} · 同比 {pct(lat.get("yoy"))}'
+               + (f' · 套均 {lat["avg_area"]:.1f} m²' if lat.get('avg_area') else ''))
+        cards.append(f'<div class="kpi-card"><div class="kpi-label">最新完整月 '
+                     f'{_html.escape(str(lat.get("period", "")))}</div>'
+                     f'<div class="kpi-value">{lat.get("units", 0):,}<span class="kpi-unit"> 套</span></div>'
+                     f'<div class="kpi-sub">{sub}</div></div>')
+    mtd = kpi.get('mtd')
+    if mtd:
+        cards.append(f'<div class="kpi-card kpi-mtd"><div class="kpi-label">'
+                     f'{_html.escape(str(mtd.get("period", "")))}（{_html.escape(str(mtd.get("note", "进行中")))})</div>'
+                     f'<div class="kpi-value">{mtd.get("units", 0):,}<span class="kpi-unit"> 套</span></div>'
+                     f'<div class="kpi-sub">仅 {mtd.get("days", "?")} 天 · 非全月，勿与完整月直接比较</div></div>')
+    return f'<div class="kpi-grid">{"".join(cards)}</div>' if cards else ''
+
+
 def _extract_title(md):
     m = re.search(r"^#{1}\s+(.+?)\s*#*\s*$", md, flags=re.M)
     return re.sub(r"[*_`]", "", m.group(1)).strip() if m else "趋势报告"
 
 
-def md_to_html(md_text, image_dir=None, charts_dir=None, vendor_path=None, no_js=False):
+def md_to_html(md_text, image_dir=None, charts_dir=None, vendor_path=None,
+               no_js=False, kpi_path=None):
     """markdown → 自包含 HTML 字符串。
 
     charts_dir + vendor_path 同时可用且非 no_js 时启用交互模式：
     与 md 图片同 stem 的 charts/<stem>.json → 图表 div（文末内联 vendor +
     数据 + bootstrap）。DASHBOARD_NO_JS=1（render_file 层读取）或 vendor
     缺失 → 纯 PNG 模式，与旧版输出一致。
+    kpi_path 存在时，`<!-- kpi -->` 占位 → 静态 KPI 卡片（构建期渲染）。
     """
     title = _extract_title(md_text)
     interactive = (not no_js) and charts_dir and vendor_path \
         and os.path.isfile(vendor_path)
     charts_ctx = {'dir': charts_dir, 'found': {}} if interactive else None
+    kpi = None
+    if kpi_path and os.path.isfile(kpi_path):
+        try:
+            with open(kpi_path, encoding='utf-8') as f:
+                kpi = json.load(f)
+        except (OSError, ValueError):
+            kpi = None
     body = _add_toc(_convert(md_text, image_dir, charts_ctx))
+    body = body.replace('<!-- kpi -->', _kpi_cards(kpi) if kpi else '')
     scripts = ''
     if charts_ctx is not None and charts_ctx['found']:
         with open(vendor_path, encoding='utf-8') as f:
@@ -476,7 +520,8 @@ def render_file(md_path, out_html_path, charts_dir=None, vendor_path=None, no_js
     if no_js is None:
         no_js = os.environ.get('DASHBOARD_NO_JS') == '1'
     html_text = md_to_html(md_text, image_dir=image_dir, charts_dir=charts_dir,
-                           vendor_path=vendor_path, no_js=no_js)
+                           vendor_path=vendor_path, no_js=no_js,
+                           kpi_path=os.path.join(image_dir, 'kpi.json'))
     os.makedirs(os.path.dirname(os.path.abspath(out_html_path)), exist_ok=True)
     with open(out_html_path, 'w', encoding='utf-8') as f:
         f.write(html_text)

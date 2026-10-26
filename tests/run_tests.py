@@ -463,6 +463,64 @@ def test_injection_guards():
         assert 'data-chart="a"' in html
 
 
+def test_kpi_cards_render():
+    """T2.3：kpi.json → 静态卡片；占位清空路径。"""
+    import json as _json
+    import os
+    from analysis import html_render as hr
+    with tempfile.TemporaryDirectory() as tmp:
+        kpi = {'latest': {'period': '2026-09', 'units': 15756, 'mom': 13.7,
+                          'yoy': -0.5, 'avg_area': 89.0},
+               'mtd': {'period': '2026-10', 'units': 8000, 'days': 24,
+                       'note': '当月至今·非全月'}}
+        with open(os.path.join(tmp, 'kpi.json'), 'w', encoding='utf-8') as f:
+            _json.dump(kpi, f, ensure_ascii=False)
+        html = hr.md_to_html('# T\n\n<!-- kpi -->\n', kpi_path=os.path.join(tmp, 'kpi.json'))
+        assert 'kpi-grid' in html and '15,756' in html and '+13.7%' in html
+        assert '当月至今·非全月' in html and '勿与完整月直接比较' in html
+        assert '<!-- kpi -->' not in html
+        html2 = hr.md_to_html('# T\n\n<!-- kpi -->\n', kpi_path=os.path.join(tmp, 'nope.json'))
+        assert '<!-- kpi -->' not in html2 and 'kpi-grid' not in html2
+
+
+def test_verify_kpi_branch():
+    """T2.3：验收门 kpi.json 直比分支。"""
+    import json as _json
+    from analysis import verify
+
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data:
+        with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
+                    '2026-09,2,2,12345,2\n')
+        with open(os.path.join(data, 'resale_daily.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('日期,签约套数,签约面积,住宅签约套数,住宅签约面积\n'
+                    '2026-10-01,1,1,100,1\n2026-10-02,1,1,50,1\n')
+        os.makedirs(os.path.join(tmp, 'charts'))
+        for stem in verify.CHART_STEMS:
+            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
+                f.write(b'x')
+            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
+                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
+                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
+        with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
+            f.write('12,345')
+        with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('<script id="chart-data"></script>')
+        kpi = {'latest': {'units': 12345}, 'mtd': {'period': '2026-10', 'units': 150, 'days': 2}}
+        with open(os.path.join(tmp, 'kpi.json'), 'w', encoding='utf-8') as f:
+            _json.dump(kpi, f)
+        ok, issues = verify.check(tmp, data)
+        assert ok, issues
+        kpi['latest']['units'] = 999
+        kpi['mtd']['units'] = 999
+        with open(os.path.join(tmp, 'kpi.json'), 'w', encoding='utf-8') as f:
+            _json.dump(kpi, f)
+        ok, issues = verify.check(tmp, data)
+        assert not ok
+        assert any('kpi.json latest.units' in i for i in issues)
+        assert any('kpi.json mtd' in i for i in issues)
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
