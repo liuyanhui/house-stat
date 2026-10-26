@@ -172,7 +172,8 @@ def test_charts_engine_bars_lines():
         text = open(os.path.join(tmp, 'charts', 'ut_bars_lines.json'), encoding='utf-8').read()
         assert 'NaN' not in text and 'Infinity' not in text
         data = _json.loads(text)
-        assert data['series'][0]['values'] == [100.0, None, 300.0]
+        assert data['option']['series'][0]['data'] == [100.0, None, 300.0]
+        assert data['height'] > 0
         opt = charts.to_echarts(spec)
         assert opt['series'][2]['data'][0]['itemStyle']['color'] == palette.PALETTE['up']
         assert opt['series'][2]['data'][1]['itemStyle']['color'] == palette.PALETTE['down']
@@ -210,6 +211,62 @@ def test_charts_engine_families():
             assert opt['series']
         heat_opt = charts.to_echarts(specs[2])
         assert heat_opt['visualMap']['max'] == 1500.0
+
+
+def test_html_render_chart_injection():
+    """T1.6a：同 stem charts/*.json + vendor → 注入 div+数据块+bootstrap；</ 转义。"""
+    import json as _json
+    import os
+    from analysis import html_render as hr
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, 'charts'))
+        with open(os.path.join(tmp, 'a.png'), 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n')
+        payload = {'name': 'a', 'kind': 'lines', 'height': 320,
+                   'option': {'title': {'text': 'x</script>'}, 'series': []}}
+        with open(os.path.join(tmp, 'charts', 'a.json'), 'w', encoding='utf-8') as f:
+            _json.dump(payload, f, ensure_ascii=False)
+        vendor = os.path.join(tmp, 'v.js')
+        with open(vendor, 'w', encoding='utf-8') as f:
+            f.write('/*vendor*/')
+        html = hr.md_to_html('![t](a.png)\n', image_dir=tmp,
+                             charts_dir=os.path.join(tmp, 'charts'),
+                             vendor_path=vendor, no_js=False)
+        assert '<div class="chart" data-chart="a"' in html
+        assert 'id="chart-data"' in html and '/*vendor*/' in html
+        assert 'IntersectionObserver' in html
+        assert '<\\/script' in html          # </ 转义防 <script> 提前闭合
+        assert '<img' not in html            # 交互模式不再内嵌 PNG
+
+
+def test_html_render_nojs_fallback():
+    """T1.6b：no_js → 纯 PNG 模式（base64 内嵌，无任何 JS）。"""
+    import os
+    from analysis import html_render as hr
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, 'charts'))
+        with open(os.path.join(tmp, 'a.png'), 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n')
+        with open(os.path.join(tmp, 'charts', 'a.json'), 'w', encoding='utf-8') as f:
+            f.write('{"name":"a","kind":"lines","height":320,"option":{}}')
+        vendor = os.path.join(tmp, 'v.js')
+        with open(vendor, 'w', encoding='utf-8') as f:
+            f.write('/*vendor*/')
+        html = hr.md_to_html('![t](a.png)\n', image_dir=tmp,
+                             charts_dir=os.path.join(tmp, 'charts'),
+                             vendor_path=vendor, no_js=True)
+        assert 'data:image/png;base64' in html
+        assert 'chart-data' not in html and '<script>' not in html
+
+
+def test_html_render_comment_passthrough_and_toc():
+    """T1.6：HTML 注释直通不被转义；<!-- toc --> 生成计数器 id 目录。"""
+    from analysis import html_render as hr
+    md = '# T\n\n<!-- kpi -->\n\n<!-- toc -->\n\n## 一、A\n\ntext\n\n### 小节\n'
+    html = hr.md_to_html(md)
+    assert '<!-- kpi -->' in html and '&lt;!--' not in html
+    assert '<nav class="toc">' in html and 'href="#sec-0"' in html
+    assert '<h2 id="sec-0"' in html and '<h3 id="sec-1"' in html
 
 
 def main():

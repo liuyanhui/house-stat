@@ -64,13 +64,28 @@ def spec_to_json_text(spec):
     return json.dumps(_sanitize(spec), ensure_ascii=False, allow_nan=False)
 
 
+def chart_payload(spec):
+    """渲染器消费的 JSON 载荷：{name, kind, height, option=完整 ECharts option}。
+
+    html_render 零依赖只读本文件产物（不 import 本模块）；option 由本模块
+    一次性算好，前端 JS 零模板。height 由 figsize 推（80px/英寸）。
+    """
+    return {
+        'name': spec['name'],
+        'kind': spec['kind'],
+        'height': int((spec.get('figsize') or (11, 5))[1] * 80),
+        'option': to_echarts(spec),
+    }
+
+
 def write_chart(spec, out_dir=None, with_png=True):
     """写 charts/<name>.json（+ <name>.png，同 stem 契约）。返回产物描述 dict。"""
     out_dir = out_dir or config.REPORT_DIR
     json_dir = os.path.join(out_dir, 'charts')
     os.makedirs(json_dir, exist_ok=True)
+    payload = chart_payload(spec)
     with open(os.path.join(json_dir, f"{spec['name']}.json"), 'w', encoding='utf-8') as f:
-        f.write(spec_to_json_text(spec))
+        f.write(json.dumps(_sanitize(payload), ensure_ascii=False, allow_nan=False))
     png = to_matplotlib(spec, out_dir) if with_png else None
     return {'png': png, 'json': f"charts/{spec['name']}.json", 'spec': spec}
 

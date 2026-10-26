@@ -91,6 +91,7 @@ def generate():
     md.append('# 北京二手住宅成交趋势报告\n')
     md.append(f'> 数据范围：{span}（共 {len(monthly)} 个月）· 数据来源：北京市住建委（官方自爬）· 仅历史趋势，不含预测\n')
     md.append('---\n')
+    md.append('<!-- toc -->\n')
 
     # 摘要
     md.append('## 一、核心摘要\n')
