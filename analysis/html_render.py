@@ -98,13 +98,13 @@ tbody tr:hover {{ background:var(--accent-light); }}
 /* 图表容器（ECharts 注入位，视觉与 img 一致） */
 .chart {{ width:100%; margin:1.2em auto; border:1px solid var(--border);
   border-radius:6px; box-sizing:border-box; }}
-/* 目录（<!-- toc --> 占位渲染） */
+/* 目录（由 toc 占位注释渲染，勿在注释里写字面占位符） */
 .toc {{ margin:1.2em 0; padding:0.6em 1.2em; background:var(--accent-light);
   border:1px solid var(--border); border-radius:8px; font-size:14px; }}
 .toc ul {{ margin:0.4em 0; padding-left:1.2em; }}
 .toc li {{ margin:0.25em 0; }}
 .toc li.lvl3 {{ padding-left:1.2em; }}
-/* KPI 卡（<!-- kpi --> 占位，kpi.json 构建期渲染） */
+/* KPI 卡（由 kpi 占位注释渲染，kpi.json 构建期静态产出） */
 .kpi-grid {{ display:flex; gap:14px; flex-wrap:wrap; margin:1.2em 0; }}
 .kpi-card {{ flex:1; min-width:220px; border:1px solid var(--border);
   border-left:4px solid var(--accent); border-radius:8px; padding:12px 16px;
