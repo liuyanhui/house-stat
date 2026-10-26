@@ -125,6 +125,9 @@ def _ec_bars_lines(spec):
     opt['xAxis'] = [{'type': 'category', 'data': spec['x']['labels'],
                      'axisLabel': {'rotate': spec['x'].get('rot', 0), 'fontSize': 10},
                      'boundaryGap': True}]
+    step = int(spec['x'].get('tick_step', 1))
+    if step > 1:
+        opt['xAxis'][0]['axisLabel']['interval'] = step - 1
     axes = [{'type': 'value', 'name': spec.get('left', {}).get('label', '')}]
     has_right = spec.get('right') or any(s.get('axis') == 'right' for s in spec['series'])
     if has_right:
@@ -240,10 +243,12 @@ def to_echarts(spec):
 
 # ---------------------------------------------------------------- matplotlib sink
 def _mpl_xticks(ax, spec):
-    x = np.arange(len(spec['x']['labels']))
+    labels = spec['x']['labels']
+    x = np.arange(len(labels))
+    step = max(1, int(spec['x'].get('tick_step', 1)))
     rot = spec['x'].get('rot', 0)
-    ax.set_xticks(x)
-    ax.set_xticklabels(spec['x']['labels'], rotation=rot,
+    ax.set_xticks(x[::step])
+    ax.set_xticklabels(labels[::step], rotation=rot,
                        ha='right' if rot else 'center',
                        fontsize=spec['x'].get('fontsize', 9))
     return x
@@ -422,3 +427,80 @@ def to_matplotlib(spec, out_dir=None):
     fig.savefig(path)
     plt.close(fig)
     return f"{spec['name']}.png"
+
+
+# ---------------------------------------------------------------- preps（T1.4b 起逐图迁移）
+# prep 吃 load/metrics 的 DataFrame，产 ChartSpec；拟合/均线/份额等一切派生
+# 序列在此算好（双 sink 只画不算）。视觉参数与旧 plots.py 对齐，迁移期用
+# 像素 diff（tests/pixel_diff.py）对照旧图，超容差人工复核记录。
+def _period_labels(periods):
+    """Period[M] 列表 → '25-01' 风格标签（与旧 plots.py 一致）。"""
+    return [f"{str(p)[2:5]}-{str(p)[5:7]}" for p in periods]
+
+
+def prep_city_trend(monthly_ma):
+    """chart1 全市月度：套数柱+折线+MA12（左）+ 同比正负柱（右）。"""
+    df = monthly_ma.dropna(subset=['住宅签约套数']).sort_values('period')
+    ma = df['MA12'].tolist() if 'MA12' in df.columns else [None] * len(df)
+    return {
+        'name': 'city_trend', 'kind': 'bars_lines',
+        'title': '北京二手住宅 月度网签量趋势', 'figsize': (11, 5),
+        'x': {'labels': _period_labels(df['period'].tolist()), 'rot': 45},
+        'left': {'label': '住宅网签套数'}, 'right': {'label': '同比 %'},
+        'series': [
+            {'type': 'bar', 'name': '月度网签套数', 'values': df['住宅签约套数'].tolist(),
+             'color': PALETTE['bar_main'], 'alpha': 0.55},
+            {'type': 'line', 'name': '套数', 'values': df['住宅签约套数'].tolist(),
+             'color': PALETTE['line_main'], 'marker': True, 'lw': 1.5},
+            {'type': 'line', 'name': '12月移动均值', 'values': ma,
+             'color': PALETTE['line_ma'], 'lw': 2.4},
+            {'type': 'bar', 'name': '同比', 'values': df['同比'].tolist(), 'axis': 'right',
+             'sign_color': True, 'alpha': 0.35, 'width': 0.5},
+        ],
+        'annotations': [],
+    }
+
+
+def prep_weekly_trend(weekly):
+    """chart9 周度：套数柱（不完整周浅橙）+MA4（左）+ 面积万m²（右）。"""
+    wk = weekly.sort_values('week_start').reset_index(drop=True)
+    partial = (wk['days'] < 7)
+    step = max(1, len(wk) // 12)
+    return {
+        'name': 'weekly_trend', 'kind': 'bars_lines',
+        'title': '北京二手住宅 周度成交趋势', 'figsize': (12, 5),
+        'x': {'labels': [d.strftime('%m/%d') for d in wk['week_start']],
+              'rot': 45, 'fontsize': 8, 'tick_step': step},
+        'left': {'label': '住宅网签套数'}, 'right': {'label': '住宅网签面积 (万m²)'},
+        'series': [
+            {'type': 'bar', 'name': '周度套数（橙=该周天数<7）', 'values': wk['套数'].tolist(),
+             'colors': [PALETTE['bar_partial'] if p else PALETTE['bar_main'] for p in partial],
+             'alpha': 0.8},
+            {'type': 'line', 'name': '4周移动均值', 'values': wk['MA4'].tolist(),
+             'color': PALETTE['line_ma'], 'lw': 2.2},
+            {'type': 'line', 'name': '周度面积(万m²)', 'values': (wk['面积'] / 1e4).tolist(),
+             'axis': 'right', 'color': PALETTE['line_aux'], 'lw': 1.3, 'alpha': 0.85},
+        ],
+        'annotations': [],
+    }
+
+
+def prep_avg_area_trend(aua):
+    """chart3 套均面积：折线 + 线性趋势虚线（拟合在此算好）。"""
+    df = aua.sort_values('period').reset_index(drop=True)
+    x = np.arange(len(df))
+    y = df['套均面积'].values
+    fit = np.poly1d(np.polyfit(x, y, 1))(x) if len(df) >= 2 else np.full_like(y, np.nan)
+    return {
+        'name': 'avg_unit_area', 'kind': 'lines',
+        'title': '套均成交面积趋势（数值↑=改善化，↓=刚需化）', 'figsize': (11, 4),
+        'x': {'labels': _period_labels(df['period'].tolist()), 'rot': 45},
+        'left': {'label': '套均面积 (m²)'},
+        'series': [
+            {'type': 'line', 'name': '套均面积', 'values': y.tolist(),
+             'color': PALETTE['structure'], 'marker': True, 'lw': 2},
+            {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
+             'color': PALETTE['trend_fit'], 'dashed': True, 'lw': 1.5},
+        ],
+        'annotations': [],
+    }
