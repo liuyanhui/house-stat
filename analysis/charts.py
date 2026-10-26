@@ -343,8 +343,11 @@ def _mpl_stacked_area(spec):
         ax.fill_between(range(n), cum, cum + vals, color=color,
                         alpha=s.get('alpha', 0.85), label=s.get('name', ''))
         cum += vals
+    # pandas plot.area 语义：y 下界钉 0（不留负边距）；份额图另设上限
     if spec.get('y_max') is not None:
         ax.set_ylim(0, spec['y_max'])
+    else:
+        ax.set_ylim(bottom=0)
     ax.set_xticks(range(n))
     ax.set_xticklabels(labels, rotation=0)
     if spec.get('left', {}).get('label'):
@@ -361,7 +364,8 @@ def _mpl_heatmap(spec):
     mat = np.asarray([[np.nan if _isna(v) else float(v) for v in row]
                       for row in spec['matrix']], dtype=float)
     nrow, ncol = mat.shape
-    fig, ax = plt.subplots(figsize=(max(5.5, 1.9 * ncol + 2.2), max(3.2, 0.8 * nrow + 1.6)))
+    figsize = spec.get('figsize') or (max(5.5, 1.9 * ncol + 2.2), max(3.2, 0.8 * nrow + 1.6))
+    fig, ax = plt.subplots(figsize=figsize)
     cmap = LinearSegmentedColormap.from_list('blues', [PALETTE['heat_low'], PALETTE['heat_high']])
     vmax = spec.get('vmax')
     if vmax is None:
@@ -450,6 +454,8 @@ def _period_labels(periods):
 
 def prep_city_trend(monthly_ma):
     """chart1 全市月度：套数柱+折线+MA12（左）+ 同比正负柱（右）。"""
+    if monthly_ma is None or monthly_ma.empty:
+        return None
     df = monthly_ma.dropna(subset=['住宅签约套数']).sort_values('period')
     ma = df['MA12'].tolist() if 'MA12' in df.columns else [None] * len(df)
     return {
@@ -473,6 +479,8 @@ def prep_city_trend(monthly_ma):
 
 def prep_weekly_trend(weekly):
     """chart9 周度：套数柱（不完整周浅橙）+MA4（左）+ 面积万m²（右）。"""
+    if weekly is None or weekly.empty:
+        return None
     wk = weekly.sort_values('week_start').reset_index(drop=True)
     partial = (wk['days'] < 7)
     step = max(1, len(wk) // 12)
@@ -497,6 +505,8 @@ def prep_weekly_trend(weekly):
 
 def prep_avg_area_trend(aua):
     """chart3 套均面积：折线 + 线性趋势虚线（拟合在此算好）。"""
+    if aua is None or aua.empty:
+        return None
     df = aua.sort_values('period').reset_index(drop=True)
     x = np.arange(len(df))
     y = df['套均面积'].values
@@ -512,5 +522,170 @@ def prep_avg_area_trend(aua):
             {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
              'color': PALETTE['trend_fit'], 'dashed': True, 'lw': 1.5},
         ],
+        'annotations': [],
+    }
+
+
+def prep_seasonality(monthly):
+    """chart2 年×月 热力（色=住宅网签套数）。"""
+    df = monthly.copy()
+    pivot = df.pivot_table(index='year', columns='month', values='住宅签约套数', aggfunc='sum')
+    pivot = pivot.reindex(columns=range(1, 13))
+    n_years = len(pivot.index)
+    return {
+        'name': 'seasonality', 'kind': 'heatmap',
+        'title': '月度网签量季节性热力图（年×月）',
+        'figsize': (11, max(2.4, 0.9 * n_years + 1.0)),
+        'x': {'labels': [f'{m}月' for m in range(1, 13)]},
+        'y': {'labels': [str(y) for y in pivot.index]},
+        'matrix': pivot.values.tolist(),
+        'value_fmt': 'int', 'colorbar_label': '套数',
+        'annotations': [],
+    }
+
+
+def prep_weekly_avg_area(weekly):
+    """chart10 周度套均面积（仅满 ≥6 天的周）：折线 + MA8 + 线性趋势（均 prep 算好）。"""
+    if weekly is None or weekly.empty:
+        return None
+    full = weekly[weekly['days'] >= 6].sort_values('week_start').reset_index(drop=True)
+    if full.empty:
+        return None
+    full = full.copy()
+    full['MA8'] = full['套均面积'].rolling(8, min_periods=3).mean()
+    x = np.arange(len(full))
+    y = full['套均面积'].values
+    fit = np.poly1d(np.polyfit(x, y, 1))(x) if len(full) >= 2 else np.full_like(y, np.nan)
+    step = max(1, len(full) // 12)
+    return {
+        'name': 'weekly_avg_area', 'kind': 'lines',
+        'title': '周度套均成交面积趋势（↑改善化 / ↓刚需化）', 'figsize': (12, 4.2),
+        'x': {'labels': [d.strftime('%m/%d') for d in full['week_start']],
+              'rot': 45, 'fontsize': 8, 'tick_step': step},
+        'left': {'label': '套均面积 (m²)'},
+        'series': [
+            {'type': 'line', 'name': '套均面积', 'values': y.tolist(),
+             'color': PALETTE['structure'], 'marker': True, 'marker_size': 3,
+             'lw': 1.4, 'alpha': 0.8},
+            {'type': 'line', 'name': '8周移动均线', 'values': full['MA8'].tolist(),
+             'color': PALETTE['trend_fit'], 'lw': 2.4},
+            {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
+             'color': PALETTE['muted'], 'dashed': True, 'lw': 1.3},
+        ],
+        'annotations': [],
+    }
+
+
+def _district_wide(district):
+    """区县 → 宽表 [period × 区县_clean]，剔全市，按总量排序。"""
+    d = district[district['区县_clean'] != '全市'].copy()
+    wide = d.pivot_table(index='period', columns='区县_clean',
+                         values='签约套数', aggfunc='sum').fillna(0)
+    order = wide.sum().sort_values(ascending=False).index
+    return wide[order]
+
+
+def _district_topn(district, n=8):
+    """Top-N 区县宽表，其余合并为"其他"。"""
+    wide = _district_wide(district)
+    if wide.empty or wide.shape[1] <= n:
+        return wide
+    top = wide.iloc[:, :n].copy()
+    top['其他'] = wide.iloc[:, n:].sum(axis=1)
+    return top
+
+
+def prep_district_stacked(district):
+    """chart5 各区成交堆叠面积（Top8+其他）。"""
+    wide = _district_topn(district, 8)
+    if wide.empty:
+        return None
+    return {
+        'name': 'district_stacked', 'kind': 'stacked_area',
+        'title': '各区二手住宅网签量（Top 8 + 其他）', 'figsize': (11, 5.5),
+        'x': {'labels': _period_labels(wide.index.tolist())},
+        'left': {'label': '网签套数'},
+        'series': [{'name': str(c), 'values': wide[c].tolist()} for c in wide.columns],
+        'annotations': [],
+    }
+
+
+def prep_district_share(district):
+    """chart6 各区份额 100% 堆叠（pct 由 prep 预计算，禁 percent 栈）。"""
+    wide = _district_topn(district, 8)
+    if wide.empty:
+        return None
+    pct = wide.div(wide.sum(axis=1), axis=0) * 100
+    return {
+        'name': 'district_share', 'kind': 'stacked_area',
+        'title': '各区网签量份额（Top 8 + 其他，100% 堆叠）', 'figsize': (11, 5.5),
+        'x': {'labels': _period_labels(wide.index.tolist())},
+        'left': {'label': '份额 %'}, 'y_max': 100,
+        'series': [{'name': str(c), 'values': pct[c].round(1).tolist()} for c in pct.columns],
+        'annotations': [],
+    }
+
+
+def prep_district_smallmul(district):
+    """chart7 各区各自趋势（小倍数）。"""
+    wide = _district_wide(district)
+    if wide.empty:
+        return None
+    nrows = int(np.ceil(len(wide.columns) / 5))
+    return {
+        'name': 'district_smallmul', 'kind': 'smallmul',
+        'title': '各区网签量走势（各自坐标）', 'ncols': 5,
+        'figsize': (13, 2.2 * nrows),
+        'x': {'labels': _period_labels(wide.index.tolist())},
+        'panels': [{'title': str(c), 'values': wide[c].tolist()} for c in wide.columns],
+        'annotations': [],
+    }
+
+
+_AREA_ORDER = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
+
+
+def _area_pivots(area):
+    """(套数透视, 占比透视)：面积段×月份。"""
+    df = area.copy()
+    df['share'] = df['成交套数'] / df.groupby('period')['成交套数'].transform('sum') * 100
+    pivot_cnt = df.pivot_table(index='面积区间', columns='period',
+                               values='成交套数', aggfunc='sum')
+    pivot_cnt = (pivot_cnt.reindex([s for s in _AREA_ORDER if s in pivot_cnt.index])
+                 .reindex(sorted(pivot_cnt.columns), axis=1))
+    pivot_sh = df.pivot_table(index='面积区间', columns='period',
+                              values='share', aggfunc='sum')
+    pivot_sh = pivot_sh.reindex(pivot_cnt.index).reindex(pivot_cnt.columns, axis=1)
+    return pivot_cnt, pivot_sh
+
+
+def prep_area_segment_count(area):
+    """chart8a 面积段×月 套数热力。"""
+    if area is None or area.empty:
+        return None
+    pivot_cnt, _ = _area_pivots(area)
+    return {
+        'name': 'area_segment_count', 'kind': 'heatmap',
+        'title': '各面积段成交套数（月度）',
+        'x': {'labels': _period_labels(pivot_cnt.columns.tolist())},
+        'y': {'labels': [str(i) for i in pivot_cnt.index]},
+        'matrix': pivot_cnt.values.tolist(),
+        'value_fmt': 'int', 'colorbar_label': '套数',
+        'annotations': [],
+    }
+
+
+def prep_area_segment_share(area):
+    """chart8b 面积段×月 占比%热力（断档月列全 NaN→空格，禁插值）。"""
+    if area is None or area.empty:
+        return None
+    _, pivot_sh = _area_pivots(area)
+    return {
+        'name': 'area_segment_share', 'kind': 'heatmap',
+        'title': '各面积段成交占比（月度，颜色=占比%）',
+        'x': {'labels': _period_labels(pivot_sh.columns.tolist())},
+        'y': {'labels': [str(i) for i in pivot_sh.index]},
+        'matrix': pivot_sh.round(1).values.tolist(),
+        'value_fmt': 'pct', 'colorbar_label': '占比 %',
         'annotations': [],
     }

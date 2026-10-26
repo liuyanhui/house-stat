@@ -10,7 +10,7 @@ import numpy as np
 
 import config
 import quality
-from . import load, metrics, plots
+from . import load, metrics, charts
 
 
 def _fmt(v, spec=',.0f'):
@@ -56,18 +56,21 @@ def generate():
     rank = metrics.district_rank_change(district) if not district.empty else pd.DataFrame()
     weekly = metrics.weekly_aggregate(daily) if not daily.empty else pd.DataFrame()
 
-    # 画图
+    # 画图（charts 引擎：PNG 与 charts/<stem>.json 同 stem 成对产出，T1.4b）
+    def _chart(spec):
+        return charts.write_chart(spec)['png'] if spec else None
+
     imgs = {}
-    imgs['city'] = plots.city_trend(monthly_ma)
-    imgs['season'] = plots.seasonality_heatmap(monthly)
-    imgs['avgarea'] = plots.avg_area_trend(aua)
-    imgs['weekly'] = plots.weekly_trend(weekly)
-    imgs['weekly_aua'] = plots.weekly_avg_area(weekly)
-    imgs['d_stack'] = plots.district_stacked(district)
-    imgs['d_share'] = plots.district_share(district)
-    imgs['d_sm'] = plots.district_small_multiples(district)
-    imgs['area_cnt'] = plots.area_segment_count(area)
-    imgs['area_sh'] = plots.area_segment_share(area)
+    imgs['city'] = _chart(charts.prep_city_trend(monthly_ma))
+    imgs['season'] = _chart(charts.prep_seasonality(monthly))
+    imgs['avgarea'] = _chart(charts.prep_avg_area_trend(aua))
+    imgs['weekly'] = _chart(charts.prep_weekly_trend(weekly))
+    imgs['weekly_aua'] = _chart(charts.prep_weekly_avg_area(weekly))
+    imgs['d_stack'] = _chart(charts.prep_district_stacked(district))
+    imgs['d_share'] = _chart(charts.prep_district_share(district))
+    imgs['d_sm'] = _chart(charts.prep_district_smallmul(district))
+    imgs['area_cnt'] = _chart(charts.prep_area_segment_count(area))
+    imgs['area_sh'] = _chart(charts.prep_area_segment_share(area))
 
     # 摘要数字
     cur = monthly.iloc[-1]
