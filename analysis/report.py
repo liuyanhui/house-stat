@@ -131,7 +131,21 @@ def generate():
         partial_n = int((weekly['days'] < 7).sum())
         wk_latest = weekly.iloc[-1]
         wk_prev = weekly.iloc[-2] if len(weekly) > 1 else None
-        wk_mom = ((wk_latest['套数'] - wk_prev['套数']) / wk_prev['套数'] * 100) if wk_prev is not None else np.nan
+        est_note = f'，含估算 {int(wk_latest["est_days"])} 天' if wk_latest.get('est_days', 0) else ''
+        if (int(wk_latest['days']) < 7 and wk_prev is not None
+                and int(wk_prev['days']) >= 7):
+            # 进行中周：与满周不可比，禁总量环比（O1），改日均口径
+            avg_now = wk_latest['套数'] / wk_latest['days']
+            avg_prev = wk_prev['套数'] / wk_prev['days']
+            d_avg = (avg_now - avg_prev) / avg_prev * 100 if avg_prev else np.nan
+            wk_note = (f'\n*最新周 {wk_latest["week_start"].date()}（进行中，仅 '
+                       f'{int(wk_latest["days"])} 天{est_note}）：{int(wk_latest["套数"]):,} 套，'
+                       f'日均 {avg_now:.0f} 套（上周日均 {avg_prev:.0f}，日均环比 {_pct(d_avg)}）。'
+                       '不完整周不做总量环比。*\n')
+        else:
+            wk_mom = ((wk_latest['套数'] - wk_prev['套数']) / wk_prev['套数'] * 100) if wk_prev is not None else np.nan
+            wk_note = (f'\n*最新周 {wk_latest["week_start"].date()}：{int(wk_latest["套数"]):,} 套 / '
+                       f'{wk_latest["面积"]:,.0f} m²，环比 {_pct(wk_mom)}{est_note}。*\n')
         md.append(f'> 基于 {n_wk} 个自然周（{weekly["week_start"].iloc[0].date()} ~ '
                   f'{weekly["week_start"].iloc[-1].date()}）。周度粒度比月度更能反映短期动能。\n')
         md.append(f'\n![周度趋势]({imgs["weekly"]})\n')
@@ -144,8 +158,7 @@ def generate():
             wrows.append([r['week_start'].strftime('%Y-%m-%d'), f"{int(r['套数']):,}",
                           f"{r['面积']:,.0f}", f"{r['套均面积']:.1f}", f"{int(r['days'])}{mark}"])
         md.append(_table(['周起始(周一)', '住宅网签(套)', '住宅面积(m²)', '套均(m²)', '天数'], wrows))
-        md.append(f'\n*最新周 {wk_latest["week_start"].date()}：{int(wk_latest["套数"]):,} 套 / '
-                  f'{wk_latest["面积"]:,.0f} m²，环比 {_pct(wk_mom)}。*\n')
+        md.append(wk_note)
 
         # 周度套均面积连续趋势（面积结构走向的代理信号）
         if imgs.get('weekly_aua'):
