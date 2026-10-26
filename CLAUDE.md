@@ -34,6 +34,7 @@ script/analyze.py --report → analysis.load → metrics → plots(PNG) → repo
 | `utils/` | 抓取/存储/校验/日志/目录 | ✓ |
 | `analysis/` | 趋势分析包（load/metrics/plots/report/html_render/ai_digest） | ✓ |
 | `script/` | 入口脚本（analyze/gen_html/gen_ai_digest/validate） | ✓ |
+| `assets/vendor/` | 第三方前端依赖原样入库（echarts.min.js 5.6.0，版本+sha256 见其 README.txt，永不手改） | ✓ |
 | `report/` | 报告产物（md+html+png，代码生成） | ✗ 已忽略，每次重生 |
 | `log/` | 运行日志 | ✗ 已忽略 |
 
