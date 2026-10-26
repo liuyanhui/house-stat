@@ -34,6 +34,19 @@ def write_gap_monthly(out_dir):
     return path
 
 
+def write_yoy_gap_monthly(out_dir):
+    """2024-01~04 + 2025-01~04（跨年断档）：2025 各月有"去年同月"但连续段不足 13 月，
+    同比必须 NaN（同比门控分支）。"""
+    rows = []
+    for y, ms in [(2024, range(1, 5)), (2025, range(1, 5))]:
+        for m in ms:
+            units = 1000 + m * 10 + (y - 2024) * 5
+            rows.append([f'{y}-{m}', int(units * 1.1), units, int(units * 0.95), units * 90])
+    path = os.path.join(out_dir, 'resale_monthly.csv')
+    _write(path, MONTHLY_HEADER, rows)
+    return path
+
+
 def write_est_week_daily(out_dir):
     """2025-05-05（周一）~ 05-11 一周；05-06/07 由调用方登记为估算日。"""
     rows = []
@@ -101,9 +114,11 @@ def _write(path, header, rows):
 
 
 def write_all(out_dir):
-    """生成全部四分支 fixture 到 out_dir，返回 {分支名: 文件路径}。"""
+    """生成分支 fixture 到 out_dir，返回 {分支名: 文件路径}（同名文件后者覆盖前者，
+    需要多种月度分支时分别调用单个生成函数并放不同目录）。"""
     return {
         'gap_monthly': write_gap_monthly(out_dir),
+        'yoy_gap': write_yoy_gap_monthly(os.path.join(out_dir, 'yoy_gap')),
         'est_week': write_est_week_daily(out_dir),
         'agency_gap': write_agency_gap(out_dir),
         'short_new': write_short_new(out_dir),

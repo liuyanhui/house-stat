@@ -33,9 +33,9 @@ def _to_period_month(s):
     return pd.to_datetime(s.astype(str).str.strip(), format='%Y-%m').dt.to_period('M')
 
 
-def load_monthly():
+def load_monthly(data_dir=None):
     """全市月度网签。返回按月升序的 DataFrame，含 year/month/period。"""
-    df = _read('resale_monthly.csv')
+    df = _read('resale_monthly.csv', data_dir)
     if df.empty:
         return df
     df = df.copy()
@@ -87,12 +87,12 @@ def load_price():
     return df
 
 
-def load_daily():
+def load_daily(data_dir=None):
     """每日存量房网签。返回按日期升序、住宅签约套数有效的 DataFrame。
 
     用于按周聚合（成交量 + 成交面积）。-1 为抓取失败占位，已剔除。
     """
-    df = _read('resale_daily.csv')
+    df = _read('resale_daily.csv', data_dir)
     if df.empty:
         return df
     df = df.copy()

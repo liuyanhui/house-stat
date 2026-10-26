@@ -7,13 +7,23 @@
 import pandas as pd
 import numpy as np
 
+import quality
+
 
 def add_yoy_mom(monthly):
-    """给全市月度表加同比/环比列（住宅签约套数）。"""
-    df = monthly.copy()
-    df = df.sort_values('period').reset_index(drop=True)
-    df['环比'] = df['住宅签约套数'].pct_change() * 100
-    # 同比：与去年同月对比
+    """给全市月度表加同比/环比列（住宅签约套数）。
+
+    防护（设计 v1.1 §2.3）：
+    - 环比断档：上一行不是上个整月（年×12+月 序数差≠1）→ NaN，禁止跨缺失月硬算；
+    - 同比门控：仅当本点处于 ≥13 个月的连续段（去年同月与之间 12 个月都在）才出值。
+    """
+    df = monthly.copy().sort_values('period').reset_index(drop=True)
+    idx = df['year'] * 12 + df['month']
+    step = idx.diff()
+    df['环比'] = np.where(step == 1, df['住宅签约套数'].pct_change() * 100, np.nan)
+
+    run_start = idx.groupby((step != 1).cumsum()).transform('first')
+    span = idx - run_start
     prev = df[['year', 'month', '住宅签约套数']].rename(
         columns={'year': 'prev_year', '住宅签约套数': '去年同月'}
     )
@@ -21,21 +31,47 @@ def add_yoy_mom(monthly):
     df = df.merge(
         prev, left_on=['year', 'month'], right_on=['prev_year', 'month'], how='left'
     )
-    df['同比'] = np.where(
+    yoy = np.where(
         df['去年同月'].notna(),
         (df['住宅签约套数'] - df['去年同月']) / df['去年同月'] * 100,
         np.nan,
     )
+    df['同比'] = np.where(span >= 12, yoy, np.nan)
     return df
 
 
 def add_moving_avg(monthly, windows=(3, 12)):
-    """加 N 月移动均值列（住宅签约套数）。"""
+    """加 N 月移动均值列（住宅签约套数）。序列短于窗口时自然全 NaN（降级）。"""
     df = monthly.copy().sort_values('period').reset_index(drop=True)
     s = df['住宅签约套数']
     for w in windows:
         df[f'MA{w}'] = s.rolling(window=w, min_periods=w).mean()
     return df
+
+
+def sanitize_bad_values(monthly):
+    """把 quality.KNOWN_ISSUES 登记的坏值置 NaN（当前：2025-01 网上签约面积）。
+
+    供 TTM/YTD 等后续指标使用：含坏值的窗口必须整窗 NaN，而不是 skipna 剔月求和。
+    """
+    df = monthly.copy()
+    for (ym, label), _ in quality.KNOWN_ISSUES.items():
+        if label == '住宅签约面积>网上签约面积':
+            df.loc[df['period'].astype(str) == ym, '网上签约面积(m2)'] = np.nan
+    return df
+
+
+def expand_estimated_days(mapping=None):
+    """ESTIMATED_DAYS 键（'2026-07-25/26' 简写或 '2026-09-16'）→ 具体 'YYYY-MM-DD' 列表。"""
+    if mapping is None:
+        mapping = quality.ESTIMATED_DAYS
+    days = []
+    for k in mapping:
+        parts = [p.strip() for p in str(k).split('/')]
+        days.append(parts[0])
+        for p in parts[1:]:
+            days.append(p if len(p) > 2 else parts[0][:8] + p)
+    return sorted(set(days))
 
 
 def avg_unit_area(monthly):
@@ -87,22 +123,32 @@ def segment_share(series_df, period_col, seg_col, val_col):
     return df
 
 
-def weekly_aggregate(daily):
+def weekly_aggregate(daily, estimated_dates=None):
     """按自然周（周一起）聚合日数据：套数、面积、套均面积、天数 + 4周移动均值。
 
+    估算标记随聚合传播（设计 v1.1 §2.3 / 需求 §5.4）：
+    - est_days：本周含估算日天数（estimated_dates 缺省取 quality.ESTIMATED_DAYS 展开）；
+    - MA4含估算：当前 MA4 窗口（近 4 周）是否含估算周。
     部分周因节假日/抓取缺口，实际天数 <7，数值偏低（已在 days 列体现）。
     """
     if daily.empty:
         return daily
+    if estimated_dates is None:
+        estimated_dates = expand_estimated_days()
+    est = {str(d)[:10] for d in estimated_dates}
     df = daily.copy()
     df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
+    df['_is_est'] = df['日期'].dt.strftime('%Y-%m-%d').isin(est)
     g = df.groupby('week_start').agg(
         套数=('住宅签约套数', 'sum'),
         面积=('住宅签约面积', 'sum'),
         days=('日期', 'nunique'),
+        est_days=('_is_est', 'sum'),
     ).reset_index().sort_values('week_start')
+    g['est_days'] = g['est_days'].astype(int)
     g['套均面积'] = np.where(g['套数'] > 0, g['面积'] / g['套数'], np.nan)
     g['MA4'] = g['套数'].rolling(4, min_periods=1).mean()
+    g['MA4含估算'] = g['est_days'].rolling(4, min_periods=1).sum() > 0
     return g.reset_index(drop=True)
 
 
