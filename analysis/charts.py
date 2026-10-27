@@ -22,11 +22,13 @@ import json
 import os
 
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import config
+import quality
 from palette import PALETTE, DISTRICT_COLORS
 
 # 中文字体 + 负号（与 plots.py 同值；plots.py 退役后此处为唯一配置点）
@@ -97,15 +99,25 @@ def _vals(values):
 
 # ---------------------------------------------------------------- ECharts sink
 def _ec_bar_data(s):
+    """柱序列 → ECharts data。着色优先级：sign_color > colors（逐柱）> 纯色；
+    edge_indexes（估算周）叠加红框（T2.2 质量标注）。"""
     vals = s.get('values', [])
-    if s.get('sign_color'):      # 同比：按正负着色
-        return [None if _isna(v) else
-                {'value': v, 'itemStyle': {'color': PALETTE['up'] if v >= 0 else PALETTE['down']}}
-                for v in vals]
-    if s.get('colors'):          # 逐柱着色（不完整周）
-        return [None if _isna(v) else {'value': v, 'itemStyle': {'color': c}}
-                for v, c in zip(vals, s['colors'])]
-    return _sanitize(vals)
+    edge = set(s.get('edge_indexes') or [])
+    out = []
+    for i, v in enumerate(vals):
+        if _isna(v):
+            out.append(None)
+            continue
+        style = {}
+        if s.get('sign_color'):
+            style['color'] = PALETTE['up'] if v >= 0 else PALETTE['down']
+        elif s.get('colors') and i < len(s['colors']) and s['colors'][i]:
+            style['color'] = s['colors'][i]
+        if i in edge:
+            style['borderColor'] = PALETTE['line_ma']
+            style['borderWidth'] = 1.5
+        out.append({'value': v, 'itemStyle': style} if style else v)
+    return out
 
 
 def _ec_line(s, **extra):
@@ -295,7 +307,14 @@ def _mpl_bars_lines(spec):
                        color=[c for c, ok in zip(colors, valid) if ok],
                        alpha=s.get('alpha', 1), width=s.get('width', 0.8))
             elif s.get('colors'):
-                ax.bar(x, vals, color=s['colors'], alpha=s.get('alpha', 1))
+                edge = set(s.get('edge_indexes') or [])
+                if edge:
+                    ec = [PALETTE['line_ma'] if i in edge else 'none'
+                          for i in range(len(vals))]
+                    ax.bar(x, vals, color=s['colors'], alpha=s.get('alpha', 1),
+                           edgecolor=ec, linewidth=1.5)
+                else:
+                    ax.bar(x, vals, color=s['colors'], alpha=s.get('alpha', 1))
             else:
                 ax.bar(x, vals, color=s.get('color', PALETTE['bar_main']),
                        alpha=s.get('alpha', 1), width=s.get('width', 0.8))
@@ -382,6 +401,7 @@ def _mpl_heatmap(spec):
     figsize = spec.get('figsize') or (max(5.5, 1.9 * ncol + 2.2), max(3.2, 0.8 * nrow + 1.6))
     fig, ax = plt.subplots(figsize=figsize)
     cmap = LinearSegmentedColormap.from_list('blues', [PALETTE['heat_low'], PALETTE['heat_high']])
+    cmap.set_bad('#f0f0f0')   # NaN 格浅灰（区别于数值低的浅蓝）
     vmax = spec.get('vmax')
     if vmax is None:
         vmax = np.nanmax(mat) if not np.all(np.isnan(mat)) else 1.0
@@ -398,6 +418,15 @@ def _mpl_heatmap(spec):
                 text = f'{v:.1f}%' if pct else f'{int(round(v)):,}'
                 ax.text(j, i, text, ha='center', va='center', fontsize=10,
                         color='white' if v > vmax * (0.55 if pct else 0.6) else '#222')
+    # 永久缺失月列标'缺'（T2.2：隐藏式省略→可见断口；仅限 annotations 声明的列）
+    ann = spec.get('annotations') or {}
+    missing = set(ann.get('missing_labels') or [])
+    if missing:
+        for j, lab in enumerate(cols):
+            if lab in missing:
+                for i in range(nrow):
+                    ax.text(j, i, '缺', ha='center', va='center',
+                            fontsize=9, color='#999')
     if spec.get('title'):
         ax.set_title(spec['title'], fontsize=13, fontweight='bold')
     fig.colorbar(im, ax=ax, label=spec.get('colorbar_label', ''), shrink=0.8)
@@ -488,7 +517,7 @@ def prep_city_trend(monthly_ma):
             {'type': 'bar', 'name': '同比', 'values': df['同比'].tolist(), 'axis': 'right',
              'sign_color': True, 'alpha': 0.35, 'width': 0.5},
         ],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -498,6 +527,8 @@ def prep_weekly_trend(weekly):
         return None
     wk = weekly.sort_values('week_start').reset_index(drop=True)
     partial = (wk['days'] < 7)
+    est_idx = [i for i, e in enumerate((wk['est_days'] > 0).tolist()) if e] \
+        if 'est_days' in wk.columns else []
     step = max(1, len(wk) // 12)
     return {
         'name': 'weekly_trend', 'kind': 'bars_lines',
@@ -508,13 +539,14 @@ def prep_weekly_trend(weekly):
         'series': [
             {'type': 'bar', 'name': '周度套数（橙=该周天数<7）', 'values': wk['套数'].tolist(),
              'colors': [PALETTE['bar_partial'] if p else PALETTE['bar_main'] for p in partial],
+             'edge_indexes': est_idx,
              'alpha': 0.8},
             {'type': 'line', 'name': '4周移动均值', 'values': wk['MA4'].tolist(),
              'color': PALETTE['line_ma'], 'lw': 2.2},
             {'type': 'line', 'name': '周度面积(万m²)', 'values': (wk['面积'] / 1e4).tolist(),
              'axis': 'right', 'color': PALETTE['line_aux'], 'lw': 1.3, 'alpha': 0.85},
         ],
-        'annotations': [],
+        'annotations': {'est_weeks': est_idx},
     }
 
 
@@ -537,7 +569,7 @@ def prep_avg_area_trend(aua):
             {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
              'color': PALETTE['trend_fit'], 'dashed': True, 'lw': 1.5},
         ],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -555,7 +587,7 @@ def prep_seasonality(monthly):
         'y': {'labels': [str(y) for y in pivot.index]},
         'matrix': pivot.values.tolist(),
         'value_fmt': 'int', 'colorbar_label': '套数',
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -587,7 +619,7 @@ def prep_weekly_avg_area(weekly):
             {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
              'color': PALETTE['muted'], 'dashed': True, 'lw': 1.3},
         ],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -621,7 +653,7 @@ def prep_district_stacked(district):
         'x': {'labels': _period_labels(wide.index.tolist())},
         'left': {'label': '网签套数'},
         'series': [{'name': str(c), 'values': wide[c].tolist()} for c in wide.columns],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -637,7 +669,7 @@ def prep_district_share(district):
         'x': {'labels': _period_labels(wide.index.tolist())},
         'left': {'label': '份额 %'}, 'y_max': 100,
         'series': [{'name': str(c), 'values': pct[c].round(1).tolist()} for c in pct.columns],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -653,7 +685,7 @@ def prep_district_smallmul(district):
         'figsize': (13, 2.2 * nrows),
         'x': {'labels': _period_labels(wide.index.tolist())},
         'panels': [{'title': str(c), 'values': wide[c].tolist()} for c in wide.columns],
-        'annotations': [],
+        'annotations': {},
     }
 
 
@@ -674,11 +706,31 @@ def _area_pivots(area):
     return pivot_cnt, pivot_sh
 
 
+def _with_missing_months(pivot):
+    """把 quality.MISSING_MONTHS['area_monthly'] 里落在数据区间内的缺失月
+    插入为全 NaN 列（T2.2：隐藏式省略 → 可见断口，禁悄悄跳过）。
+
+    返回 (补列后的 pivot, 缺失月标签列表)。
+    """
+    present = sorted(pivot.columns)
+    if not present:
+        return pivot, []
+    missing_periods = [pd.Period(m) for m in quality.MISSING_MONTHS.get('area_monthly', [])]
+    in_span = [p for p in missing_periods if present[0] <= p <= present[-1]
+               and p not in present]
+    if not in_span:
+        return pivot, []
+    out = pivot.reindex(columns=sorted(present + in_span))
+    labels = [f"{str(p)[2:4]}-{str(p)[5:7]}" for p in in_span]
+    return out, labels
+
+
 def prep_area_segment_count(area):
-    """chart8a 面积段×月 套数热力。"""
+    """chart8a 面积段×月 套数热力（缺失月列可见，NaN 格标'缺'）。"""
     if area is None or area.empty:
         return None
     pivot_cnt, _ = _area_pivots(area)
+    pivot_cnt, missing = _with_missing_months(pivot_cnt)
     return {
         'name': 'area_segment_count', 'kind': 'heatmap',
         'title': '各面积段成交套数（月度）',
@@ -686,15 +738,16 @@ def prep_area_segment_count(area):
         'y': {'labels': [str(i) for i in pivot_cnt.index]},
         'matrix': pivot_cnt.values.tolist(),
         'value_fmt': 'int', 'colorbar_label': '套数',
-        'annotations': [],
+        'annotations': {'missing_labels': missing},
     }
 
 
 def prep_area_segment_share(area):
-    """chart8b 面积段×月 占比%热力（断档月列全 NaN→空格，禁插值）。"""
+    """chart8b 面积段×月 占比%热力（缺失月列可见，断档禁插值）。"""
     if area is None or area.empty:
         return None
     _, pivot_sh = _area_pivots(area)
+    pivot_sh, missing = _with_missing_months(pivot_sh)
     return {
         'name': 'area_segment_share', 'kind': 'heatmap',
         'title': '各面积段成交占比（月度，颜色=占比%）',
@@ -702,5 +755,5 @@ def prep_area_segment_share(area):
         'y': {'labels': [str(i) for i in pivot_sh.index]},
         'matrix': pivot_sh.round(1).values.tolist(),
         'value_fmt': 'pct', 'colorbar_label': '占比 %',
-        'annotations': [],
+        'annotations': {'missing_labels': missing},
     }

@@ -108,6 +108,19 @@ def generate():
     with open(os.path.join(config.REPORT_DIR, 'kpi.json'), 'w', encoding='utf-8') as f:
         json.dump(kpi, f, ensure_ascii=False, allow_nan=False)
 
+    # 质量元数据（T2.2/T2.4）：六字段，coverage 从数据派生，图上标注/头部新鲜度同源
+    gen_at = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
+    periods = {
+        'resale_monthly': [str(p) for p in monthly['period']],
+        'resale_daily': [d.strftime('%Y-%m-%d') for d in daily['日期']] if not daily.empty else [],
+        'district_monthly': sorted(str(p) for p in district['period'].unique()) if not district.empty else [],
+        'area_monthly': sorted(str(p) for p in area['period'].unique()) if not area.empty else [],
+        'annual': [str(int(y)) for y in annual['年份']] if not annual.empty else [],
+    }
+    with open(os.path.join(config.REPORT_DIR, 'quality.json'), 'w', encoding='utf-8') as f:
+        json.dump(quality.dataset_meta(periods, generated_at=gen_at), f,
+                  ensure_ascii=False)
+
     md = []
     md.append('# 北京二手住宅成交趋势报告\n')
     md.append(f'> 数据范围：{span}（共 {len(monthly)} 个月）· 数据来源：北京市住建委（官方自爬）· 仅历史趋势，不含预测\n')
@@ -171,8 +184,11 @@ def generate():
         md.append(f'> 基于 {n_wk} 个自然周（{weekly["week_start"].iloc[0].date()} ~ '
                   f'{weekly["week_start"].iloc[-1].date()}）。周度粒度比月度更能反映短期动能。\n')
         md.append(f'\n![周度趋势]({imgs["weekly"]})\n')
+        est_total = int((weekly['est_days'] > 0).sum()) if 'est_days' in weekly.columns else 0
+        est_note_chart = f'红框柱=含估算日的周（共 {est_total} 周，明细见数据说明）。' if est_total else ''
         md.append('\n*柱=周度套数，红线=4 周移动均值，绿线=周度面积（右轴）。'
-                  f'橙色柱表示该周天数 <7（节假日/抓取缺口），数值偏低（共 {partial_n} 周）。*\n')
+                  f'橙色柱表示该周天数 <7（节假日/抓取缺口），数值偏低（共 {partial_n} 周）。'
+                  f'{est_note_chart}*\n')
         md.append('\n### 近 10 周\n')
         wrows = []
         for _, r in weekly.iloc[::-1].head(10).iterrows():

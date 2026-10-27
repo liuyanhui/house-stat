@@ -10,6 +10,12 @@ import difflib
 import re
 import sys
 
+# Windows 控制台默认 GBK，报告里的 ⚠️/中文会崩；统一 utf-8
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
+
 
 def main():
     if len(sys.argv) != 4:

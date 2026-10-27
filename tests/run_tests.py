@@ -328,12 +328,12 @@ def test_baseline_diff_whitelist_gate():
         with open(wl, 'w', encoding='utf-8') as f:
             f.write('B2\n')
         r = subprocess.run([_sys.executable, script, base, cur, wl],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding='utf-8')
         assert r.returncode == 0, r.stdout + r.stderr      # 差异命中白名单
         with open(wl, 'w', encoding='utf-8') as f:
             f.write('zzz\n')
         r = subprocess.run([_sys.executable, script, base, cur, wl],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding='utf-8')
         assert r.returncode == 1                            # 白名单外 → 非零
         assert '>>' in r.stdout
 
@@ -353,7 +353,8 @@ def test_pixel_diff_exit_codes():
 
         def run(x, y):
             return subprocess.run([_sys.executable, script, x, y],
-                                  capture_output=True, text=True).returncode
+                                  capture_output=True, text=True,
+                                  encoding='utf-8').returncode
         assert run(p1, p2) == 0
         assert run(p1, p3) == 1
         assert run(p1, p4) == 2
@@ -519,6 +520,42 @@ def test_verify_kpi_branch():
         assert not ok
         assert any('kpi.json latest.units' in i for i in issues)
         assert any('kpi.json mtd' in i for i in issues)
+
+
+def test_quality_annotations():
+    """T2.2：估算周红框（双 sink）、面积段缺失月可见断口、quality.json 产出。"""
+    import os
+    from analysis import load, metrics, charts
+    # 估算周：fixture 周（2 天估算）→ 柱带红框
+    with tempfile.TemporaryDirectory() as tmp:
+        make_fixtures.write_est_week_daily(tmp)
+        w = metrics.weekly_aggregate(load.load_daily(tmp),
+                                     estimated_dates=['2025-05-06', '2025-05-07'])
+        spec = charts.prep_weekly_trend(w)
+        assert spec['annotations']['est_weeks']
+        opt = charts.to_echarts(spec)
+        bars = opt['series'][0]['data']
+        assert any(isinstance(b, dict) and b['itemStyle'].get('borderColor')
+                   for b in bars)
+        charts.write_chart(spec, out_dir=tmp)   # mpl 边框路径不抛错
+
+    # 面积段：2026-04 以可见空列出现在 x 轴，该列全 None
+    spec = charts.prep_area_segment_count(load.load_area())
+    assert '26-04' in spec['x']['labels']
+    assert spec['annotations']['missing_labels'] == ['26-04']
+    j = spec['x']['labels'].index('26-04')
+    assert all(row[j] is None for row in charts._sanitize(spec['matrix']))
+
+    # quality.json：现场生成后验六字段（自足，不依赖历史产物）
+    from analysis import report as report_mod
+    report_mod.generate()
+    assert os.path.isfile('report/quality.json')
+    import json as _json
+    q = _json.loads(open('report/quality.json', encoding='utf-8').read())
+    assert 'resale_monthly' in q and q['resale_monthly']['coverage']
+    assert all(k in q['resale_daily'] for k in
+               ('coverage', 'estimated_days', 'missing_months', 'known_issues',
+                'notes', 'generated_at'))
 
 
 def main():
