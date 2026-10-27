@@ -51,6 +51,17 @@ def generate():
 
     os.makedirs(config.REPORT_DIR, exist_ok=True)
 
+    # 干净房间（code-review 抓获）：先清本次将重生成的图表产物——若页面改版
+    # 致某 prep 返回 None，旧 PNG/JSON 不得冒充新产物混过 verify 门（fail-closed）
+    charts_dir = os.path.join(config.REPORT_DIR, 'charts')
+    if os.path.isdir(charts_dir):
+        for fn in os.listdir(charts_dir):
+            if fn.endswith('.json'):
+                os.remove(os.path.join(charts_dir, fn))
+    for fn in os.listdir(config.REPORT_DIR):
+        if fn.endswith('.png'):
+            os.remove(os.path.join(config.REPORT_DIR, fn))
+
     # 指标
     monthly_yoy = metrics.add_yoy_mom(monthly)
     monthly_ma = metrics.add_moving_avg(monthly_yoy, windows=(12,))
@@ -314,9 +325,10 @@ def generate():
         md.append(_table(header, rows))
         md.append('\n*占比变化为百分点(pp)。正值=该面积段份额上升，负值=下降。*\n')
 
-    # 新房市场（M3 R1/R2，插在数据说明前；守卫与各节一致用 imgs.get）
-    md.append('\n## 六、新房市场（认购/签约/库存）\n')
+    # 新房市场（M3 R1/R2，插在数据说明前；守卫与各节一致用 imgs.get，
+    # 标题在守卫内——三 prep 全空时不留空节/空目录项）
     if any(imgs.get(k) for k in ('new_wk', 'resale_new', 'new_inv')):
+        md.append('\n## 六、新房市场（认购/签约/库存）\n')
         md.append('> 新房认购/签约字段 2026-08-23 起全量（序列尚短，趋势仅作方向参考）；'
                   '2026-09-16 缺失（约定 11）。区县维度官方不发布，全市口径。\n')
         if imgs.get('new_wk'):
@@ -327,7 +339,7 @@ def generate():
             md.append(f'\n![二手vs新房]({imgs["resale_new"]})\n')
             md.append('\n*同窗口对照：蓝=二手住宅周网签，橙=新房周签约（住宅），绿虚线=新房周认购。'
                       '新房序列自 2026-08 下旬起，禁止跨窗口外推。*\n')
-        if imgs.get('new_inv') and not inv_df.empty:
+        if imgs.get('new_inv'):
             inv_latest = inv_df.iloc[-1]
             md.append(f'\n![新房库存]({imgs["new_inv"]})\n')
             md.append(f'\n*住宅库存快照=可售期房住宅+未签约现房住宅，最新 '

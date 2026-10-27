@@ -127,8 +127,11 @@ def _first_non_null(*seqs):
     return 0
 
 
-def _week_axis(dates, fontsize=9):
-    """周类 x 轴配置：'%m/%d' 标签 + 45° + 稀疏刻度（>12 点每 n//12 取一）。"""
+def _date_axis(dates, fontsize=9):
+    """日/周类日期 x 轴：'%m/%d' 标签 + 45° + 稀疏刻度（>12 点每 n//12 取一）。
+
+    刻度稀疏化按点数自适应，日频序列同样适用（如 new_inventory ~160 点）。
+    """
     return {'labels': [d.strftime('%m/%d') for d in dates],
             'rot': 45, 'fontsize': fontsize, 'tick_step': max(1, len(dates) // 12)}
 
@@ -598,7 +601,7 @@ def prep_weekly_trend(weekly):
     return {
         'name': 'weekly_trend', 'kind': 'bars_lines',
         'title': '北京二手住宅 周度成交趋势', 'figsize': (12, 5),
-        'x': _week_axis(wk['week_start'].tolist(), fontsize=8),
+        'x': _date_axis(wk['week_start'].tolist(), fontsize=8),
         'left': {'label': '住宅网签套数'}, 'right': {'label': '住宅网签面积 (万m²)'},
         'series': [
             {'type': 'bar', 'name': '周度套数（橙=该周天数<7）', 'values': wk['套数'].tolist(),
@@ -675,7 +678,7 @@ def prep_weekly_avg_area(weekly):
     return {
         'name': 'weekly_avg_area', 'kind': 'lines',
         'title': '周度套均成交面积趋势（↑改善化 / ↓刚需化）', 'figsize': (12, 4.2),
-        'x': _week_axis(full['week_start'].tolist(), fontsize=8),
+        'x': _date_axis(full['week_start'].tolist(), fontsize=8),
         'left': {'label': '套均面积 (m²)'},
         'y_min': 80, 'tick_decimals': 2,
         'series': [
@@ -812,7 +815,7 @@ def prep_new_weekly(nw):
     return {
         'name': 'new_weekly', 'kind': 'bars_lines',
         'title': '新房住宅周度认购与签约（期房+现房）', 'figsize': (11, 4.5),
-        'x': _week_axis(g['week_start'].tolist()),
+        'x': _date_axis(g['week_start'].tolist()),
         'left': {'label': '住宅套数'},
         'series': [
             {'type': 'bar', 'name': '周签约住宅（橙=不完整周）', 'values': g['签约住宅'].tolist(),
@@ -844,7 +847,7 @@ def prep_resale_vs_new(weekly, nw):
         'name': 'resale_vs_new', 'kind': 'lines',
         'title': '二手 vs 新房：住宅周度成交对照（新房序列自 2026-08 下旬起）',
         'figsize': (11, 4.5),
-        'x': _week_axis(m['week_start'].tolist()),
+        'x': _date_axis(m['week_start'].tolist()),
         'left': {'label': '住宅套数'},
         'series': [
             {'type': 'line', 'name': '二手住宅周网签', 'values': m['套数'].tolist(),
@@ -867,7 +870,7 @@ def prep_new_inventory(inv):
         'name': 'new_inventory', 'kind': 'lines',
         'title': '新房住宅库存快照（可售期房住宅 + 未签约现房住宅，万套）',
         'figsize': (11, 4),
-        'x': _week_axis(df['日期'].tolist()),
+        'x': _date_axis(df['日期'].tolist()),
         'left': {'label': '万套'},
         'series': [
             {'type': 'line', 'name': '住宅库存', 'values': (df['库存住宅'] / 1e4).round(3).tolist(),

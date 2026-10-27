@@ -647,11 +647,12 @@ def test_ui_fixes():
     assert all(round(v, 2) == v for v in s['series'][0]['values'])
     opt = charts.to_echarts(s)
     assert opt['yAxis'][0]['min'] == 80
-    # 累计视角：首点即有数据（前导全空已裁）
+    # 累计视角：首点即有数据（前导全空已裁；NaN 非 None，须用 _isna 判，
+    # `is not None` 对 float64 列恒真——code-review 抓获的空转断言）
     m_cum = metrics.add_ytd(metrics.add_ttm(
         metrics.sanitize_bad_values(metrics.add_yoy_mom(monthly))))
     c = charts.prep_cum_view(m_cum)
-    assert c['series'][0]['values'][0] is not None
+    assert not charts._isna(c['series'][0]['values'][0])
 
 
 def test_new_home_and_district_mom():

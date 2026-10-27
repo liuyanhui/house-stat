@@ -127,11 +127,12 @@ def _week_bucket(df, aggs):
     """按自然周（周一起）分桶的共用实现。aggs: {输出列: (源列, 聚合)}。
 
     周口径（周一起、跨月归月首所在周）只此一处定义，周度类聚合共用。
+    会修改传入的 df（新增 week_start 列）——调用方须传自己的副本。
+    返回按周升序且重排索引（末尾 reset 已含，调用方无需再 reset）。
     """
-    df = df.copy()
     df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
     return (df.groupby('week_start').agg(**aggs)
-            .reset_index().sort_values('week_start'))
+            .reset_index().sort_values('week_start').reset_index(drop=True))
 
 
 def weekly_aggregate(daily, estimated_dates=None):
@@ -152,7 +153,7 @@ def weekly_aggregate(daily, estimated_dates=None):
     g = _week_bucket(df, {'套数': ('住宅签约套数', 'sum'),
                           '面积': ('住宅签约面积', 'sum'),
                           'days': ('日期', 'nunique'),
-                          'est_days': ('_is_est', 'sum')}).reset_index(drop=True)
+                          'est_days': ('_is_est', 'sum')})
     g['est_days'] = g['est_days'].astype(int)
     g['套均面积'] = np.where(g['套数'] > 0, g['面积'] / g['套数'], np.nan)
     g['MA4'] = g['套数'].rolling(4, min_periods=1).mean()
@@ -223,7 +224,7 @@ def new_home_weekly(new_daily):
     df['签约住宅'] = df['期房签约住宅套数'].fillna(0) + df['现房签约住宅套数'].fillna(0)
     g = _week_bucket(df, {'认购住宅': ('认购住宅', 'sum'),
                           '签约住宅': ('签约住宅', 'sum'),
-                          'days': ('日期', 'nunique')}).reset_index(drop=True)
+                          'days': ('日期', 'nunique')})
     g['MA4'] = g['签约住宅'].rolling(4, min_periods=1).mean()
     return g
 
