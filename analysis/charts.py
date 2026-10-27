@@ -222,8 +222,12 @@ def _ec_heatmap(spec):
     opt['visualMap'] = {
         'min': 0, 'max': vmax, 'calculable': True,
         'orient': 'horizontal', 'left': 'center', 'bottom': 0,
-        'inRange': {'color': [PALETTE['heat_low'], PALETTE['heat_high']]},
+        'inRange': {'color': ([PALETTE['down'], '#ffffff', PALETTE['up']]
+                              if spec.get('diverging') else
+                              [PALETTE['heat_low'], PALETTE['heat_high']])},
     }
+    if spec.get('diverging'):
+        opt['visualMap']['min'] = -vmax
     # 注意：heatmap 的字符串模板 '{c}' 会渲染成 "[x,y,v]" 三元组（ECharts 行为），
     # 故 label 不带 formatter，用默认（只显示数值）；单位由标题/色条承载。
     opt['series'] = [{
@@ -415,7 +419,14 @@ def _mpl_heatmap(spec):
     vmax = spec.get('vmax')
     if vmax is None:
         vmax = np.nanmax(mat) if not np.all(np.isnan(mat)) else 1.0
-    im = ax.imshow(mat, aspect='auto', cmap=cmap, vmin=0, vmax=vmax)
+    vmin = 0
+    if spec.get('diverging'):  # 环比类：橙-白-绿对称色阶
+        vmax = float(np.nanmax(np.abs(mat))) or 1.0
+        vmin = -vmax
+        cmap = LinearSegmentedColormap.from_list(
+            'div', [PALETTE['down'], '#ffffff', PALETTE['up']])
+        cmap.set_bad('#f0f0f0')
+    im = ax.imshow(mat, aspect='auto', cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_xticks(range(ncol))
     ax.set_xticklabels(cols, rotation=0)
     ax.set_yticks(range(nrow))
@@ -745,6 +756,106 @@ def prep_structure_share(share_df):
             {'type': 'line', 'name': '非住宅面积占比', 'values': df['非住宅面积占比'].round(2).tolist(),
              'color': PALETTE['structure'], 'marker': True, 'lw': 1.8},
         ],
+        'annotations': {},
+    }
+
+
+def prep_new_weekly(nw):
+    """R1 新房周度（住宅）：签约柱（不完整周浅橙）+ 认购线 + MA4。前导空周裁剪。"""
+    if nw is None or nw.empty:
+        return None
+    g = nw.copy()
+    first = next((i for i, v in enumerate(g['签约住宅'].tolist()) if v > 0), None)
+    if first is None:
+        return None
+    g = g.iloc[first:].reset_index(drop=True)
+    partial = g['days'] < 7
+    step = max(1, len(g) // 12)
+    return {
+        'name': 'new_weekly', 'kind': 'bars_lines',
+        'title': '新房住宅周度认购与签约（期房+现房）', 'figsize': (11, 4.5),
+        'x': {'labels': [d.strftime('%m/%d') for d in g['week_start']],
+              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'left': {'label': '住宅套数'},
+        'series': [
+            {'type': 'bar', 'name': '周签约住宅（橙=不完整周）', 'values': g['签约住宅'].tolist(),
+             'colors': [PALETTE['bar_partial'] if p else PALETTE['bar_main'] for p in partial],
+             'alpha': 0.8},
+            {'type': 'line', 'name': '周认购住宅', 'values': g['认购住宅'].tolist(),
+             'color': PALETTE['line_aux'], 'marker': True, 'lw': 1.6},
+            {'type': 'line', 'name': '签约4周均线', 'values': g['MA4'].tolist(),
+             'color': PALETTE['line_ma'], 'lw': 2.0},
+        ],
+        'annotations': {},
+    }
+
+
+def prep_resale_vs_new(weekly, nw):
+    """R2 二手 vs 新房周度对照（共同窗口：新房字段全量起）。"""
+    if weekly is None or weekly.empty or nw is None or nw.empty:
+        return None
+    w = weekly[['week_start', '套数']].copy()
+    n = nw.copy()
+    first = next((i for i, v in enumerate(n['签约住宅'].tolist()) if v > 0), None)
+    if first is None:
+        return None
+    n = n.iloc[first:]
+    m = w.merge(n[['week_start', '签约住宅', '认购住宅']], on='week_start', how='inner')
+    if m.empty:
+        return None
+    step = max(1, len(m) // 12)
+    return {
+        'name': 'resale_vs_new', 'kind': 'lines',
+        'title': '二手 vs 新房：住宅周度成交对照（新房序列自 2026-08 下旬起）',
+        'figsize': (11, 4.5),
+        'x': {'labels': [d.strftime('%m/%d') for d in m['week_start']],
+              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'left': {'label': '住宅套数'},
+        'series': [
+            {'type': 'line', 'name': '二手住宅周网签', 'values': m['套数'].tolist(),
+             'color': PALETTE['line_main'], 'lw': 2.2},
+            {'type': 'line', 'name': '新房周签约(住宅)', 'values': m['签约住宅'].tolist(),
+             'color': PALETTE['down'], 'marker': True, 'lw': 1.8},
+            {'type': 'line', 'name': '新房周认购(住宅)', 'values': m['认购住宅'].tolist(),
+             'color': PALETTE['line_aux'], 'dashed': True, 'marker': True, 'lw': 1.6},
+        ],
+        'annotations': {},
+    }
+
+
+def prep_new_inventory(inv):
+    """R1 新房住宅库存快照（万套，日频，2026-04-29 起全程可得）。"""
+    if inv is None or inv.empty:
+        return None
+    df = inv.sort_values('日期').reset_index(drop=True)
+    step = max(1, len(df) // 12)
+    return {
+        'name': 'new_inventory', 'kind': 'lines',
+        'title': '新房住宅库存快照（可售期房住宅 + 未签约现房住宅，万套）',
+        'figsize': (11, 4),
+        'x': {'labels': [d.strftime('%m/%d') for d in df['日期']],
+              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'left': {'label': '万套'},
+        'series': [
+            {'type': 'line', 'name': '住宅库存', 'values': (df['库存住宅'] / 1e4).round(3).tolist(),
+             'color': PALETTE['structure'], 'lw': 1.8},
+        ],
+        'annotations': {},
+    }
+
+
+def prep_district_mom(mom_wide):
+    """区县月度环比%热力（发散色：绿涨/白零/橙跌；首月无环比）。"""
+    if mom_wide is None or mom_wide.empty:
+        return None
+    mat = mom_wide.round(1)
+    return {
+        'name': 'district_mom', 'kind': 'heatmap', 'diverging': True,
+        'title': '各区签约套数月度环比%（绿=涨 橙=跌 白=0；首月无环比）',
+        'x': {'labels': _period_labels(list(mat.columns))},
+        'y': {'labels': [str(i) for i in mat.index]},
+        'matrix': mat.values.tolist(),
+        'value_fmt': 'pct', 'colorbar_label': '环比 %',
         'annotations': {},
     }
 

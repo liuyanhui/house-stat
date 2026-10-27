@@ -41,6 +41,7 @@ def generate():
     area = load.load_area()
     price = load.load_price()
     daily = load.load_daily()
+    new_daily = load.load_new_daily()
 
     # 覆盖月数（metrics.coverage_counts 为 report 与 ai_digest 共用实现）
     n_months, n_dist_months, n_area_months = metrics.coverage_counts(monthly, district, area)
@@ -77,6 +78,12 @@ def generate():
     m_cum = metrics.add_ytd(metrics.add_ttm(monthly_s))
     imgs['cum'] = _chart(charts.prep_cum_view(m_cum))
     imgs['share'] = _chart(charts.prep_structure_share(metrics.nonresidential_share(monthly_s)))
+    # M3 R1/R2（用户 2026-10-27 确认口径）：新房周度三件套 + 区县环比热力
+    new_wk = metrics.new_home_weekly(new_daily)
+    imgs['new_wk'] = _chart(charts.prep_new_weekly(new_wk))
+    imgs['resale_new'] = _chart(charts.prep_resale_vs_new(weekly, new_wk))
+    imgs['new_inv'] = _chart(charts.prep_new_inventory(metrics.new_inventory(new_daily)))
+    imgs['d_mom'] = _chart(charts.prep_district_mom(metrics.district_mom(district)))
 
     # 摘要数字
     cur = monthly.iloc[-1]
@@ -120,6 +127,7 @@ def generate():
         'resale_daily': [d.strftime('%Y-%m-%d') for d in daily['日期']] if not daily.empty else [],
         'district_monthly': sorted(str(p) for p in district['period'].unique()) if not district.empty else [],
         'area_monthly': sorted(str(p) for p in area['period'].unique()) if not area.empty else [],
+        'new_daily': [d.strftime('%Y-%m-%d') for d in new_daily['日期']] if not new_daily.empty else [],
         'annual': [str(int(y)) for y in annual['年份']] if not annual.empty else [],
     }
     with open(os.path.join(config.REPORT_DIR, 'quality.json'), 'w', encoding='utf-8') as f:
@@ -261,6 +269,12 @@ def generate():
         md.append(_table(['区县', '最新套数', '最新排名', '首月排名', '排名变化', '份额变化'], rrows))
         md.append('')
 
+    if imgs.get('d_mom'):
+        md.append('\n### 各区月度环比热力\n')
+        md.append(f'![各区环比]({imgs["d_mom"]})\n')
+        md.append('\n*各区签约套数月度环比%（发散色：绿=涨、橙=跌、白=0；首月无环比）。'
+                  '区县数据为月度粒度——官方不发布区县×周数据，此为最细可用粒度。*\n')
+
     # 市场结构
     md.append('\n## 五、市场结构\n')
     if not area.empty:
@@ -299,8 +313,28 @@ def generate():
         md.append(_table(header, rows))
         md.append('\n*占比变化为百分点(pp)。正值=该面积段份额上升，负值=下降。*\n')
 
+    # 新房市场（M3 R1/R2，插在数据说明前）
+    md.append('\n## 六、新房市场（认购/签约/库存）\n')
+    if not new_daily.empty:
+        inv_latest = metrics.new_inventory(new_daily).iloc[-1]
+        md.append('> 新房认购/签约字段 2026-08-23 起全量（序列尚短，趋势仅作方向参考）；'
+                  '2026-09-16 缺失（约定 11）。区县维度官方不发布，全市口径。\n')
+        if imgs.get('new_wk'):
+            md.append(f'\n![新房周度]({imgs["new_wk"]})\n')
+            md.append('\n*柱=周签约住宅套数（期房+现房，橙=不完整周），绿线=周认购住宅，'
+                      '红线=签约 4 周均线。认购通常领先签约约一周，可作短期先行观察。*\n')
+        if imgs.get('resale_new'):
+            md.append(f'\n![二手vs新房]({imgs["resale_new"]})\n')
+            md.append('\n*同窗口对照：蓝=二手住宅周网签，橙=新房周签约（住宅），绿虚线=新房周认购。'
+                      '新房序列自 2026-08 下旬起，禁止跨窗口外推。*\n')
+        if imgs.get('new_inv'):
+            md.append(f'\n![新房库存]({imgs["new_inv"]})\n')
+            md.append(f'\n*住宅库存快照=可售期房住宅+未签约现房住宅，最新 '
+                      f'{inv_latest["库存住宅"] / 1e4:.2f} 万套（{inv_latest["日期"]:%Y-%m-%d}）。'
+                      '去化周期待满 3 个完整签约月后启用（预计 2027 年初起出值），当前先列库存水位。*\n')
+
     # 数据说明 + 参考锚点
-    md.append('\n## 六、数据说明\n')
+    md.append('\n## 七、数据说明\n')
     md.append('- **主数据**：全部来自北京市住建委（pageId=307749）官方自爬，经完整性校验（面积/价格段加总=全市）。\n')
     md.append(f'- **月度覆盖**：{span}（{n_months} 个月）。区县 {n_dist_months} 个月。'
               f'面积段 {n_area_months} 个月（序列不连续）。\n')

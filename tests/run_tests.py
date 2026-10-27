@@ -652,6 +652,42 @@ def test_ui_fixes():
     assert c['series'][0]['values'][0] is not None
 
 
+def test_new_home_and_district_mom():
+    """M3 R1/R2：新房周度聚合与前导裁剪、库存公式、区县环比防护、四 prep 冒烟。"""
+    import numpy as np
+    from analysis import load, metrics, charts
+    with tempfile.TemporaryDirectory() as tmp:
+        make_fixtures.write_short_new(tmp)
+        nd = load.load_new_daily(data_dir=tmp)
+        nw = metrics.new_home_weekly(nd)
+        first = next(i for i, v in enumerate(nw['签约住宅'].tolist()) if v > 0)
+        assert nw.iloc[first]['week_start'].strftime('%Y-%m-%d') == '2026-08-17'  # 8-23 属该周
+        full_days = int((nd['日期'] >= '2026-08-23').sum())
+        assert int(nw.iloc[first:]['签约住宅'].sum()) == 220 * full_days
+        spec = charts.prep_new_weekly(nw)
+        assert spec['series'][0]['values'][0] > 0
+        charts.to_echarts(spec)
+        inv = metrics.new_inventory(nd)
+        assert (inv['库存住宅'] == 39000 + 2 * np.arange(len(inv))).all()
+
+    dm = metrics.district_mom(load.load_district())
+    assert dm.isna().iloc[:, 0].all()                       # 首月无环比
+    vals = dm.values.flatten()
+    # 真实区间约 -58%~+232%（小基数区翻倍属正常），界只防荒谬值
+    assert (np.abs(vals[~np.isnan(vals)]) < 500).all()
+    s = charts.prep_district_mom(dm)
+    assert s['diverging'] is True
+    charts.to_echarts(s)
+
+    nd_real = load.load_new_daily()
+    nw_real = metrics.new_home_weekly(nd_real)
+    for s2 in (charts.prep_new_weekly(nw_real),
+               charts.prep_resale_vs_new(metrics.weekly_aggregate(load.load_daily()), nw_real),
+               charts.prep_new_inventory(metrics.new_inventory(nd_real))):
+        assert s2 is not None
+        charts.to_echarts(s2)
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())

@@ -26,7 +26,8 @@ HTML_SIZE_LIMIT = 2 * 1024 * 1024
 CHART_STEMS = ['city_trend', 'seasonality', 'avg_unit_area', 'weekly_trend',
                'weekly_avg_area', 'district_stacked', 'district_share',
                'district_smallmul', 'area_segment_count', 'area_segment_share',
-               'cum_view', 'structure_share']
+               'cum_view', 'structure_share', 'new_weekly', 'resale_vs_new',
+               'new_inventory', 'district_mom']
 
 _VENDOR_MARKERS = ['heatmap', 'dataZoom', 'toolbox', 'markLine',
                    'visualMap', 'legend', 'tooltip']
@@ -181,5 +182,28 @@ def check(report_dir, data_dir, no_js=False):
                 issues.append(f'非住宅占比越界: {bad_v[:3]}（应 ∈(0,100)）')
         except (KeyError, IndexError, TypeError):
             issues.append('structure_share option 结构异常')
+
+    # 9) 新房周签约独立重算（csv 直读 ≥2026-08-23 期房+现房签约住宅和 == 图序列总和）
+    nw_js = os.path.join(charts_dir, 'new_weekly.json')
+    nw_csv = os.path.join(data_dir, 'new_daily.csv')
+    if os.path.isfile(nw_js) and os.path.isfile(nw_csv):
+        try:
+            payload = json.loads(open(nw_js, encoding='utf-8').read())
+            bar = payload['option']['series'][0]['data']
+            chart_sum = sum((b['value'] if isinstance(b, dict) else b)
+                            for b in bar if b is not None)
+            csv_sum = 0.0
+            with open(nw_csv, encoding='utf-8-sig') as f:
+                for r in csv.DictReader(f):
+                    if str(r.get('日期', '')) >= '2026-08-23':
+                        for c in ('期房签约住宅套数', '现房签约住宅套数'):
+                            v = float(r.get(c) or -1)
+                            if v > 0:
+                                csv_sum += v
+            if abs(chart_sum - csv_sum) > 0.5:
+                issues.append(f'新房周签约不符: 图总和 {chart_sum:.0f} '
+                              f'!= 独立重算 {csv_sum:.0f}')
+        except (KeyError, IndexError, TypeError):
+            issues.append('new_weekly option 结构异常')
 
     return (not issues), issues

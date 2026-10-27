@@ -202,6 +202,57 @@ def nonresidential_share(monthly):
     return df
 
 
+def new_home_weekly(new_daily):
+    """新房周度（住宅口径，R1）：认购/签约 = 期房+现房合计，按自然周（周一起）。
+
+    认购/签约字段 2026-08-23 起全量（此前 NaN→0，prep 层裁前导空周）；
+    days<7 为不完整周（含 9-16 缺失影响的周）。附 MA4。
+    """
+    if new_daily is None or new_daily.empty:
+        return new_daily
+    df = new_daily.copy()
+    df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
+    df['认购住宅'] = df['期房认购住宅套数'].fillna(0) + df['现房认购住宅套数'].fillna(0)
+    df['签约住宅'] = df['期房签约住宅套数'].fillna(0) + df['现房签约住宅套数'].fillna(0)
+    g = (df.groupby('week_start')
+         .agg(认购住宅=('认购住宅', 'sum'), 签约住宅=('签约住宅', 'sum'),
+              days=('日期', 'nunique'))
+         .reset_index().sort_values('week_start'))
+    g['MA4'] = g['签约住宅'].rolling(4, min_periods=1).mean()
+    return g.reset_index(drop=True)
+
+
+def new_inventory(new_daily):
+    """新房住宅库存快照（日频）：可售期房住宅 + 未签约现房住宅（套）。
+
+    库存列 2026-04-29 起全程有效（列级清洗保留）。去化周期需 3 个完整
+    签约月（字段全量且无缺日）才启用——当前 0 个（9 月缺 16 日），
+    预计 2027-01 起出值，先只列库存（设计决策表 #4）。
+    """
+    if new_daily is None or new_daily.empty:
+        return new_daily
+    df = new_daily.copy()
+    df['库存住宅'] = df['可售期房住宅套数'] + df['未签约现房住宅套数']
+    return df[['日期', '库存住宅']].dropna(subset=['库存住宅'])
+
+
+def district_mom(district):
+    """各区签约套数月度环比%（宽表：行=区县按总量排序，列=月）。
+
+    首月无环比；断档防护（当前区县序列连续，防御性：跨档整列 NaN）。
+    """
+    d = district[district['区县_clean'] != '全市'].copy()
+    wide = d.pivot_table(index='period', columns='区县_clean',
+                         values='签约套数', aggfunc='sum')
+    wide = wide[wide.sum().sort_values(ascending=False).index]
+    mom = wide.pct_change() * 100
+    mom.iloc[0] = np.nan
+    for i in range(1, len(wide)):
+        if (wide.index[i] - wide.index[i - 1]).n != 1:
+            mom.iloc[i] = np.nan
+    return mom.T  # 行=区县、列=月（热力图布局）
+
+
 def coverage_counts(monthly, district, area):
     """数据覆盖月数 (月度, 区县, 面积段)——report 与 ai_digest 共用的唯一计数实现。"""
     return (len(monthly),
