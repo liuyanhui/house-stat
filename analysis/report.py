@@ -42,6 +42,7 @@ def generate():
     price = load.load_price()
     daily = load.load_daily()
     new_daily = load.load_new_daily()
+    agency = load.load_agency()
 
     # 覆盖月数（metrics.coverage_counts 为 report 与 ai_digest 共用实现）
     n_months, n_dist_months, n_area_months = metrics.coverage_counts(monthly, district, area)
@@ -96,6 +97,11 @@ def generate():
     imgs['resale_new'] = _chart(charts.prep_resale_vs_new(weekly, new_wk))
     imgs['new_inv'] = _chart(charts.prep_new_inventory(inv_df))
     imgs['d_mom'] = _chart(charts.prep_district_mom(metrics.district_mom(district)))
+    # M3 R4/R3：五年锚点 + 机构板块
+    imgs['annual'] = _chart(charts.prep_annual_anchor(metrics.annual_anchor(monthly, annual)))
+    agency_top10 = metrics.agency_top(agency)
+    imgs['agency_top'] = _chart(charts.prep_agency_top(agency_top10))
+    imgs['refund'] = _chart(charts.prep_refund_rate(metrics.agency_refund(agency)))
 
     # 摘要数字
     cur = monthly.iloc[-1]
@@ -140,6 +146,7 @@ def generate():
         'district_monthly': sorted(str(p) for p in district['period'].unique()) if not district.empty else [],
         'area_monthly': sorted(str(p) for p in area['period'].unique()) if not area.empty else [],
         'new_daily': [d.strftime('%Y-%m-%d') for d in new_daily['日期']] if not new_daily.empty else [],
+        'agency_monthly': sorted(str(p) for p in agency['period'].unique()) if not agency.empty else [],
         'annual': [str(int(y)) for y in annual['年份']] if not annual.empty else [],
     }
     with open(os.path.join(config.REPORT_DIR, 'quality.json'), 'w', encoding='utf-8') as f:
@@ -206,6 +213,12 @@ def generate():
         md.append('\n### 非住宅占比\n')
         md.append(f'![非住宅占比]({imgs["share"]})\n')
         md.append('\n*非住宅 = 总量 − 住宅。2025-01 面积口径坏值 → 该点缺失（不插值）。*\n')
+    if imgs.get('annual'):
+        md.append('\n### 五年长周期锚点\n')
+        md.append(f'![五年锚点]({imgs["annual"]})\n')
+        md.append('\n*年度住宅成交（万套）：2020–2024 为官方年度表（万套圆整值），'
+                  '2025 为自爬月度求和（精确值）——两段存在口径切换缝，仅作周期定位锚点、'
+                  '不做趋势外推；灰虚线为官方五年均值。*\n')
 
     # 周度趋势
     md.append('\n## 三、周度成交趋势\n')
@@ -346,8 +359,29 @@ def generate():
                       f'{inv_latest["库存住宅"] / 1e4:.2f} 万套（{inv_latest["日期"]:%Y-%m-%d}）。'
                       '去化周期待满 3 个完整签约月后启用（预计 2027 年初起出值），当前先列库存水位。*\n')
 
+    # 机构格局（M3 R3，插在数据说明前）
+    if imgs.get('agency_top') or imgs.get('refund'):
+        md.append('\n## 七、机构格局（上榜口径）\n')
+        md.append('> 经纪机构月度排行（2025-12 起，缺 2026-05/06——页面删列致解析断流，'
+                  '约定 9）。份额为**上榜机构内份额**（分母=当月上榜机构签约合计，非全市）；'
+                  '上榜名单逐月变动。\n')
+        if not agency_top10.empty:
+            latest_ym = str(agency['period'].max())
+            md.append(f'\n### {latest_ym} Top{len(agency_top10)}（签约套数 / 上榜内份额）\n')
+            arows = [[_r['经纪机构'], f"{int(_r['签约套数']):,}", f"{_r['上榜份额']:.1f}%"]
+                     for _, _r in agency_top10.iterrows()]
+            md.append(_table(['经纪机构', '签约套数', '上榜内份额'], arows))
+            md.append('')
+        if imgs.get('agency_top'):
+            md.append(f'\n![机构Top]({imgs["agency_top"]})\n')
+        if imgs.get('refund'):
+            md.append(f'\n![退房率]({imgs["refund"]})\n')
+            md.append('\n*柱=当月退房率（Σ上榜退房/Σ上榜签约），红线=3 月滚动（窗口内 Σ/Σ'
+                      ' 合并比，禁比率均值）；2026-05/06 断档月缺失、跨断档滚动窗口为空'
+                      '（不插值）。退房是历史签约的回流，解读为"回流强度"而非当月成交质量。*\n')
+
     # 数据说明 + 参考锚点
-    md.append('\n## 七、数据说明\n')
+    md.append('\n## 八、数据说明\n')
     md.append('- **主数据**：全部来自北京市住建委（pageId=307749）官方自爬，经完整性校验（面积/价格段加总=全市）。\n')
     md.append(f'- **月度覆盖**：{span}（{n_months} 个月）。区县 {n_dist_months} 个月。'
               f'面积段 {n_area_months} 个月（序列不连续）。\n')

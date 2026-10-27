@@ -896,6 +896,76 @@ def prep_district_mom(mom_wide):
     }
 
 
+_AGENCY_SUFFIXES = ('房地产经纪有限责任公司', '房地产经纪有限公司',
+                    '经纪有限公司', '经纪有限责任公司')
+
+
+def _short_agency(name):
+    for suf in _AGENCY_SUFFIXES:
+        if str(name).endswith(suf):
+            return str(name)[:-len(suf)]
+    return str(name)
+
+
+def prep_annual_anchor(anchor_rows):
+    """R4 五年锚点（住宅·万套）：官方年度+完整年月度和；附官方五年均值参考线。"""
+    if not anchor_rows:
+        return None
+    labels = [str(r['年份']) for r in anchor_rows]
+    vals = [r['万套'] for r in anchor_rows]
+    official = [r['万套'] for r in anchor_rows if r['口径'] == '官方年度']
+    mean5 = float(np.mean(official)) if official else None
+    series = [{'type': 'line', 'name': '年度住宅成交（万套）', 'values': vals,
+               'color': PALETTE['line_main'], 'marker': True, 'lw': 2}]
+    if mean5 is not None:
+        series.append({'type': 'line', 'name': '官方五年均值', 'values': [mean5] * len(vals),
+                       'color': PALETTE['muted'], 'dashed': True, 'lw': 1.5})
+    return {
+        'name': 'annual_anchor', 'kind': 'lines',
+        'title': '二手住宅年度成交长周期锚点（万套）', 'figsize': (11, 4),
+        'x': {'labels': labels},
+        'left': {'label': '万套'},
+        'series': series,
+        'annotations': {},
+    }
+
+
+def prep_agency_top(top):
+    """R3 最新月 Top10 机构签约柱（上榜内口径，机构名截短）。"""
+    if top is None or top.empty:
+        return None
+    return {
+        'name': 'agency_top', 'kind': 'bars_lines',
+        'title': f"最新月经纪机构 Top{len(top)} 签约（上榜内口径）", 'figsize': (11, 4.5),
+        'x': {'labels': [_short_agency(n) for n in top['经纪机构']], 'rot': 45, 'fontsize': 9},
+        'left': {'label': '签约套数'},
+        'series': [
+            {'type': 'bar', 'name': '签约套数', 'values': top['签约套数'].tolist(),
+             'color': PALETTE['bar_main'], 'alpha': 0.85},
+        ],
+        'annotations': {},
+    }
+
+
+def prep_refund_rate(ref):
+    """R3 退房率：当月柱 + 3月滚动线（断档月空，禁插值）。"""
+    if ref is None or ref.empty:
+        return None
+    return {
+        'name': 'refund_rate', 'kind': 'bars_lines',
+        'title': '上榜机构退房率：当月与 3 月滚动（%）', 'figsize': (11, 4.5),
+        'x': {'labels': _period_labels(ref['period'].tolist()), 'rot': 45},
+        'left': {'label': '%'},
+        'series': [
+            {'type': 'bar', 'name': '当月退房率', 'values': ref['退房率'].tolist(),
+             'color': PALETTE['bar_main'], 'alpha': 0.8},
+            {'type': 'line', 'name': '3月滚动(Σ/Σ)', 'values': ref['滚动3月'].tolist(),
+             'color': PALETTE['line_ma'], 'lw': 2.0},
+        ],
+        'annotations': {},
+    }
+
+
 # 面积段标准序（单一来源：report 表格与热力图共用；评审回归——曾漏一段静默丢行）
 AREA_SEGMENTS = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
 _AREA_ORDER = AREA_SEGMENTS

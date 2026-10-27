@@ -722,6 +722,40 @@ def test_chart_numbers_two_decimals():
         assert all(round(f, 2) == f for f in vals), spec['name']
 
 
+def test_m3_agency_and_annual():
+    """M3 R3/R4：退房率断档整窗空、Σ/Σ 合并比、Top10 份额、年度锚点拼接。"""
+    import numpy as np
+    from analysis import load, metrics, charts
+    ref = metrics.agency_refund(load.load_agency())
+    r = ref.set_index(ref['period'].astype(str))
+    assert np.isnan(r.loc['2026-05', '退房率']) and np.isnan(r.loc['2026-06', '退房率'])
+    # 跨断档滚动窗口（05/06 前后各 3 月窗）整窗 NaN
+    assert np.isnan(r.loc['2026-06', '滚动3月'])
+    # 合并比抽查：最新月当月值 = Σ退房/Σ签约
+    g = load.load_agency()
+    latest = g['period'].max()
+    m = g[g['period'] == latest]
+    expect = m['退房套数'].sum() / m['签约套数'].sum() * 100
+    assert abs(r.loc[str(latest), '退房率'] - expect) < 1e-9
+
+    top = metrics.agency_top(g)
+    assert len(top) == 10
+    assert (top['上榜份额'] > 0).all() and top['上榜份额'].sum() <= 100 + 1e-9
+    assert top['上榜份额'].iloc[0] >= top['上榜份额'].iloc[-1]   # nlargest 降序
+
+    anchor = metrics.annual_anchor(load.load_monthly(), load.load_annual())
+    by_year = {a['年份']: a for a in anchor}
+    assert 2025 in by_year and by_year[2025]['口径'] == '月度求和'
+    monthly25 = load.load_monthly()
+    monthly25 = monthly25[monthly25['period'].dt.year == 2025]
+    assert abs(by_year[2025]['万套'] - monthly25['住宅签约套数'].sum() / 1e4) < 1e-9
+
+    for s in (charts.prep_annual_anchor(anchor), charts.prep_agency_top(top),
+              charts.prep_refund_rate(ref)):
+        assert s is not None
+        charts.to_echarts(s)
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())

@@ -27,7 +27,8 @@ CHART_STEMS = ['city_trend', 'seasonality', 'avg_unit_area', 'weekly_trend',
                'weekly_avg_area', 'district_stacked', 'district_share',
                'district_smallmul', 'area_segment_count', 'area_segment_share',
                'cum_view', 'structure_share', 'new_weekly', 'resale_vs_new',
-               'new_inventory', 'district_mom']
+               'new_inventory', 'district_mom', 'annual_anchor', 'agency_top',
+               'refund_rate']
 
 _VENDOR_MARKERS = ['heatmap', 'dataZoom', 'toolbox', 'markLine',
                    'visualMap', 'legend', 'tooltip']

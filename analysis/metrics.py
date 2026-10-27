@@ -259,6 +259,50 @@ def district_mom(district):
     return mom.T  # 行=区县、列=月（热力图布局）
 
 
+def agency_refund(agency):
+    """机构退房率（月度，上榜口径，R3）。
+
+    当月 = Σ上榜退房/Σ上榜签约；滚动3月 = 窗口内 Σ/Σ（合并比，禁比率均值）。
+    2026-05/06 断档月补全为 NaN 行：当月值缺失，且任何含断档月的滚动窗口
+    整窗 NaN（rolling min_periods=3 天然满足）。
+    """
+    if agency is None or agency.empty:
+        return agency
+    g = agency.groupby('period')[['签约套数', '退房套数']].sum()
+    full = g.reindex(pd.period_range(g.index.min(), g.index.max(), freq='M'))
+    full['退房率'] = np.where(full['签约套数'] > 0,
+                             full['退房套数'] / full['签约套数'] * 100, np.nan)
+    s3 = full[['签约套数', '退房套数']].rolling(3).sum()
+    full['滚动3月'] = np.where(s3['签约套数'] > 0,
+                               s3['退房套数'] / s3['签约套数'] * 100, np.nan)
+    full.index.name = 'period'
+    return full.reset_index()
+
+
+def agency_top(agency, n=10):
+    """最新月 Top N 机构 + 上榜内份额%（分母=当月上榜机构签约合计，非全市）。"""
+    if agency is None or agency.empty:
+        return agency
+    latest = agency['period'].max()
+    m = agency[agency['period'] == latest]
+    top = m.nlargest(n, '签约套数').copy()
+    top['上榜份额'] = top['签约套数'] / m['签约套数'].sum() * 100
+    return top
+
+
+def annual_anchor(monthly, annual):
+    """五年长周期锚点（住宅·万套，R4）：官方年度 2020–2024（圆整值）+
+    月度覆盖满 12 个月的年份求和（精确值）。口径切换缝由图注明示。
+    """
+    rows = {}
+    for _, r in annual.iterrows():
+        rows[int(r['年份'])] = {'万套': float(r['住宅套数万']), '口径': '官方年度'}
+    for y, grp in monthly.groupby(monthly['period'].dt.year):
+        if len(grp) == 12 and int(y) not in rows:
+            rows[int(y)] = {'万套': grp['住宅签约套数'].sum() / 1e4, '口径': '月度求和'}
+    return [{'年份': y, **rows[y]} for y in sorted(rows)]
+
+
 def coverage_counts(monthly, district, area):
     """数据覆盖月数 (月度, 区县, 面积段)——report 与 ai_digest 共用的唯一计数实现。"""
     return (len(monthly),
