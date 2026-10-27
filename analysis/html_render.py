@@ -95,6 +95,10 @@ th {{ background:var(--accent-light); color:var(--fg); font-weight:bold;
   border-bottom:2px solid var(--accent); }}
 tbody tr:nth-child(even) {{ background:#fafbfc; }}
 tbody tr:hover {{ background:var(--accent-light); }}
+/* 可排序表：纵向滚动 + 表头吸顶（sticky 须在滚动容器内才生效） */
+.table-wrap.sortable {{ max-height:520px; overflow:auto; }}
+.table-wrap.sortable thead th {{ position:sticky; top:0; z-index:1; cursor:pointer; }}
+.table-wrap.sortable thead th:hover {{ filter:brightness(0.96); }}
 /* 图表容器（ECharts 注入位，视觉与 img 一致） */
 .chart {{ width:100%; margin:1.2em auto; border:1px solid var(--border);
   border-radius:6px; box-sizing:border-box; }}
@@ -201,22 +205,87 @@ def _is_table_block(buf):
     return bool(re.match(r"^\|?[\s:|-]+$", buf[1].strip())) and '|' in buf[1] and len(cells) >= 1
 
 
+def _cell_key(text):
+    """显示串 → 可排序数值（Python 侧预计算，JS 零计算）。
+
+    支持本项目格式：千分位/百分号/pp/⚠️ 后缀、+/- 前缀、'YYYY-MM[-DD]' 日期、
+    '—'/'N/A' → None（排序置尾）。解析不了（如区县名、区间段）→ None。
+    """
+    s = str(text).strip()
+    for ch in (',', '%', 'pp', '⚠️', '↑', '↓', ' '):
+        s = s.replace(ch, '')
+    if s in ('', '—', '-', 'N/A', 'None', '…'):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    m = re.match(r'^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$', s)
+    if m:
+        return float(f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3) or 0):02d}")
+    return None
+
+
+def _fmt_key(v):
+    return str(int(v)) if float(v).is_integer() else repr(v)
+
+
+_SORT_JS = """(function () {
+  document.querySelectorAll('.table-wrap.sortable table').forEach(function (t) {
+    var ths = Array.prototype.slice.call(t.querySelectorAll('thead th'));
+    ths.forEach(function (h, ci) {
+      h.addEventListener('click', function () {
+        var asc = h.getAttribute('data-dir') !== 'asc';
+        ths.forEach(function (x) {
+          x.removeAttribute('data-dir');
+          x.textContent = x.textContent.replace(/ [\\u2191\\u2193]$/, '');
+        });
+        h.setAttribute('data-dir', asc ? 'asc' : 'desc');
+        h.textContent += asc ? ' \\u2191' : ' \\u2193';
+        var tbody = t.querySelector('tbody');
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          var va = a.children[ci].getAttribute('data-v');
+          var vb = b.children[ci].getAttribute('data-v');
+          va = va === null ? null : parseFloat(va);
+          vb = vb === null ? null : parseFloat(vb);
+          if (va === null && vb === null) return 0;
+          if (va === null) return 1;      /* 缺失/NaN 置尾 */
+          if (vb === null) return -1;
+          return asc ? va - vb : vb - va;
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+      });
+    });
+  });
+})();"""
+
+
 def _table_html(buf):
     def cells(line):
         return [c.strip() for c in line.strip().strip('|').split('|')]
 
     header = cells(buf[0])
     rows = [cells(r) for r in buf[2:]]
-    out = ['<div class="table-wrap"><table>', '<thead><tr>']
+    keyed = False
+    out = ['<div class="table-wrap sortable"><table>', '<thead><tr>']
     out += [f"<th>{_inline(h)}</th>" for h in header]
     out += ['</tr></thead>', '<tbody>']
     for r in rows:
         out.append('<tr>')
         ncol = len(header)
         for i in range(ncol):
-            out.append(f"<td>{_inline(r[i]) if i < len(r) else ''}</td>")
+            cell = _inline(r[i]) if i < len(r) else ''
+            attr = ''
+            k = _cell_key(re.sub(r'<[^>]+>', '', cell))
+            if k is not None:
+                attr = f' data-v="{_fmt_key(k)}"'
+                keyed = True
+            out.append(f'<td{attr}>{cell}</td>')
         out.append('</tr>')
-    out += ['</tbody></table></div>']
+    out.append('</tbody></table></div>')
+    if not keyed:
+        out[0] = '<div class="table-wrap"><table>'
     return '\n'.join(out)
 
 
@@ -484,6 +553,8 @@ def md_to_html(md_text, image_dir=None, charts_dir=None, vendor_path=None,
         scripts = (f'<script>{vendor_js}</script>\n'
                    f'<script type="application/json" id="chart-data">{chart_json}</script>\n'
                    f'<script>{_BOOTSTRAP}</script>')
+    if not no_js and 'table-wrap sortable' in body:
+        scripts += ('\n' if scripts else '') + f'<script>{_SORT_JS}</script>'
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>

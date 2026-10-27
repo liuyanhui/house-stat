@@ -561,6 +561,21 @@ def test_quality_annotations():
     assert '数据截止：日度' in md and '生成 20' in md and '进行中' in md
 
 
+def test_table_sortable():
+    """T2.5：可排序表——data-v 键 Python 推断、纯文字表不加 sortable、NO_JS 无脚本。"""
+    from analysis import html_render as hr
+    md = '| A | B |\n| --- | --- |\n| 15,756 | — |\n| 2,001 | +3.4% |\n| 2026-09 | 朝阳 |\n'
+    html = hr.md_to_html(md)
+    assert 'table-wrap sortable' in html
+    assert 'data-v="15756"' in html and 'data-v="3.4"' in html
+    assert 'data-v="20260900"' in html          # 'YYYY-MM' → YYYYMM00（单调即可比）
+    assert 'data-dir' in html                      # 排序 JS 已注入
+    plain = hr.md_to_html('| A |\n| --- |\n| 文字 |\n')
+    assert 'table-wrap sortable' not in plain and 'data-dir' not in plain
+    nojs = hr.md_to_html(md, no_js=True)
+    assert 'table-wrap sortable' in nojs and 'data-dir' not in nojs
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
