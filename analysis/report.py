@@ -124,6 +124,17 @@ def generate():
     md = []
     md.append('# 北京二手住宅成交趋势报告\n')
     md.append(f'> 数据范围：{span}（共 {len(monthly)} 个月）· 数据来源：北京市住建委（官方自爬）· 仅历史趋势，不含预测\n')
+    # 新鲜度分数据集标注（O2/T2.4）：与 quality.json 同源，禁单一截止日误导
+    fres = []
+    if not daily.empty:
+        fres.append(f"日度 {daily['日期'].max().strftime('%Y-%m-%d')}")
+    if not district.empty:
+        fres.append(f"区县/面积段 {district['period'].min()}~{district['period'].max()}")
+    if not annual.empty:
+        fres.append(f"年度 {int(annual['年份'].min())}~{int(annual['年份'].max())}")
+    mtd_flag = (f" ｜ 本月 {daily['日期'].max().strftime('%Y-%m')} 进行中"
+                if not daily.empty else '')
+    md.append(f"> 数据截止：{' · '.join(fres)} ｜ 生成 {gen_at}{mtd_flag}\n")
     md.append('---\n')
     md.append('<!-- toc -->\n')
 

@@ -556,6 +556,9 @@ def test_quality_annotations():
     assert all(k in q['resale_daily'] for k in
                ('coverage', 'estimated_days', 'missing_months', 'known_issues',
                 'notes', 'generated_at'))
+    # T2.4：新鲜度头部（与 quality.json 同源）
+    md = open('report/trend_report.md', encoding='utf-8').read()
+    assert '数据截止：日度' in md and '生成 20' in md and '进行中' in md
 
 
 def main():
