@@ -281,9 +281,10 @@ def test_verify_gate():
         for stem in verify.CHART_STEMS:
             with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
                 f.write(b'x')
+            data = [50] if stem == 'structure_share' else [12345]   # 占比图须 ∈(0,100)
             with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
                 _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
+                            'option': {'series': [{'type': 'bar', 'data': data}]}}, f)
         city = {'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
                 'option': {'series': [{'type': 'bar', 'data': [1, last_units]}]}}
         if tamper == 'nan':
@@ -370,9 +371,10 @@ def test_verify_gate_branches():
         for stem in verify.CHART_STEMS:
             with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
                 f.write(b'x')
+            data = [50] if stem == 'structure_share' else [12345]
             with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
                 _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
+                            'option': {'series': [{'type': 'bar', 'data': data}]}}, f)
         with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
             f.write('12,345')
         with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
@@ -506,9 +508,10 @@ def test_verify_kpi_branch():
         for stem in verify.CHART_STEMS:
             with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
                 f.write(b'x')
+            vals = [50] if stem == 'structure_share' else [12345]
             with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
                 _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
+                            'option': {'series': [{'type': 'bar', 'data': vals}]}}, f)
         with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
             f.write('12,345')
         with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
@@ -551,6 +554,9 @@ def test_quality_annotations():
     assert spec['annotations']['missing_labels'] == ['26-04']
     j = spec['x']['labels'].index('26-04')
     assert all(row[j] is None for row in charts._sanitize(spec['matrix']))
+    # 回归守卫（架构评审 M2 抓过）：段数必须与单一来源一致，防静默丢行
+    assert spec['y']['labels'] == charts.AREA_SEGMENTS
+    assert len(spec['matrix']) == len(charts.AREA_SEGMENTS)
 
     # quality.json：现场生成后验六字段（自足，不依赖历史产物）
     from analysis import report as report_mod
@@ -580,6 +586,12 @@ def test_table_sortable():
     assert 'table-wrap sortable' not in plain and 'data-dir' not in plain
     nojs = hr.md_to_html(md, no_js=True)
     assert 'table-wrap sortable' in nojs and 'data-dir' not in nojs
+    # QA 评审补充：_cell_key 直接断言（M2 盲区）
+    assert hr._cell_key('89.0') == 89.0
+    assert hr._cell_key('+0.33pp') == 0.33
+    assert hr._cell_key('6 ⚠️') == 6
+    assert hr._cell_key('100～120m2') is None
+    assert hr._cell_key('朝阳') is None
 
 
 def test_ttm_ytd_share():

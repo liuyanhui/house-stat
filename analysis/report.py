@@ -272,8 +272,8 @@ def generate():
         md.append(f'\n*占比视角剥离总量波动（如 2 月春节全线塌量），更能看出结构迁移。'
                   f'当前 {n_area_months} 个月（2026-04 不可补、缺失），序列不连续。*\n')
 
-        # 各面积段 × 月份 占比表 + 占比变化(pp)
-        order = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
+        # 各面积段 × 月份 占比表 + 占比变化(pp)；段序单一来源（charts.AREA_SEGMENTS）
+        order = charts.AREA_SEGMENTS
         months = sorted(area['period'].unique())
         df = area.copy()
         df['share'] = df['成交套数'] / df.groupby('period')['成交套数'].transform('sum') * 100

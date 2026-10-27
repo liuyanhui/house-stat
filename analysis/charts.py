@@ -725,7 +725,9 @@ def prep_structure_share(share_df):
     }
 
 
-_AREA_ORDER = ['60m2以下', '60～80m2', '80～100m2', '120～140m2', '140m2以上']
+# 面积段标准序（单一来源：report 表格与热力图共用；评审回归——曾漏一段静默丢行）
+AREA_SEGMENTS = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
+_AREA_ORDER = AREA_SEGMENTS
 
 
 def _area_pivots(area):

@@ -169,4 +169,17 @@ def check(report_dir, data_dir, no_js=False):
         except (KeyError, IndexError, TypeError, ValueError):
             issues.append('cum_view option 结构异常，累计口径断言无法执行')
 
+    # 8) 非住宅占比值域（设计 §2.8 承诺）：structure_share 全部非空值 ∈(0,100)
+    sh_js = os.path.join(charts_dir, 'structure_share.json')
+    if os.path.isfile(sh_js):
+        try:
+            payload = json.loads(open(sh_js, encoding='utf-8').read())
+            vals = [v for s in payload['option']['series'] for v in s['data']
+                    if v is not None]
+            bad_v = [v for v in vals if not (0 < v < 100)]
+            if bad_v:
+                issues.append(f'非住宅占比越界: {bad_v[:3]}（应 ∈(0,100)）')
+        except (KeyError, IndexError, TypeError):
+            issues.append('structure_share option 结构异常')
+
     return (not issues), issues
