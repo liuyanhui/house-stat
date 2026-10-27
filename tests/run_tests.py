@@ -690,6 +690,37 @@ def test_new_home_and_district_mom():
         charts.to_echarts(s2)
 
 
+def test_chart_numbers_two_decimals():
+    """全局规则：图表 JSON 中所有浮点 ≤2 位小数（MA 尾数/浮点残渣/3 位库存全兜住）。"""
+    from analysis import load, metrics, charts
+
+    def floats(o):
+        if isinstance(o, float):
+            yield o
+        elif isinstance(o, dict):
+            for v in o.values():
+                yield from floats(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from floats(v)
+
+    weekly = metrics.weekly_aggregate(load.load_daily())
+    monthly = metrics.add_yoy_mom(load.load_monthly())
+    m_cum = metrics.add_ytd(metrics.add_ttm(
+        metrics.sanitize_bad_values(monthly)))
+    specs = [
+        charts.prep_weekly_trend(weekly),                       # MA4 浮点残渣
+        charts.prep_weekly_avg_area(weekly),                    # MA8 除法尾数
+        charts.prep_city_trend(metrics.add_moving_avg(monthly, windows=(12,))),
+        charts.prep_cum_view(m_cum),                            # YTD 百分比
+        charts.prep_new_inventory(metrics.new_inventory(load.load_new_daily())),  # 曾 3 位
+    ]
+    for spec in specs:
+        vals = list(floats(charts.chart_payload(spec)))
+        assert vals, spec['name']
+        assert all(round(f, 2) == f for f in vals), spec['name']
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())

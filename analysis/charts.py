@@ -66,17 +66,33 @@ def spec_to_json_text(spec):
     return json.dumps(_sanitize(spec), ensure_ascii=False, allow_nan=False)
 
 
+def _round_floats(obj):
+    """递归圆整浮点到 2 位（用户口径：图表数值 ≤2 位小数）。
+
+    覆盖派生指标除法尾数（MA/同比/占比）与浮点残渣（如 3132.7000000000003）。
+    只作用于 ECharts option；matplotlib PNG 直接读 spec、标签另有格式化，不受影响。
+    """
+    if isinstance(obj, float):
+        return round(obj, 2)
+    if isinstance(obj, dict):
+        return {k: _round_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_round_floats(v) for v in obj]
+    return obj
+
+
 def chart_payload(spec):
     """渲染器消费的 JSON 载荷：{name, kind, height, option=完整 ECharts option}。
 
     html_render 零依赖只读本文件产物（不 import 本模块）；option 由本模块
     一次性算好，前端 JS 零模板。height 由 figsize 推（80px/英寸）。
+    option 落盘前统一圆整浮点（≤2 位小数，全局规则非单图特例）。
     """
     return {
         'name': spec['name'],
         'kind': spec['kind'],
         'height': int((spec.get('figsize') or (11, 5))[1] * 80),
-        'option': to_echarts(spec),
+        'option': _round_floats(to_echarts(spec)),
     }
 
 
