@@ -679,7 +679,7 @@ def test_new_home_and_district_mom():
     # 真实区间约 -58%~+232%（小基数区翻倍属正常），界只防荒谬值
     assert (np.abs(vals[~np.isnan(vals)]) < 500).all()
     s = charts.prep_district_mom(dm)
-    assert s['diverging'] is True
+    assert s['piecewise'] is True
     charts.to_echarts(s)
 
     nd_real = load.load_new_daily()
@@ -754,6 +754,33 @@ def test_m3_agency_and_annual():
               charts.prep_refund_rate(ref)):
         assert s is not None
         charts.to_echarts(s)
+
+
+def test_ui_round2():
+    """用户验收第二轮：纯线轴自适应下限 / 环比热力七档分色 / 红框说明自解释。"""
+    import os
+    from analysis import charts, load, metrics
+    # 1) _axis_min：显式 y_min 优先；柱轴保持 0 基线；纯线下限低于数据最小值
+    assert charts._axis_min({'series': [{'type': 'line', 'values': [100, 110]}]}) == 98.0
+    assert charts._axis_min({'y_min': 80, 'series': [{'type': 'line', 'values': [100, 110]}]}) == 80
+    assert charts._axis_min({'series': [{'type': 'bar', 'values': [1, 2]},
+                                        {'type': 'line', 'values': [100, 110]}]}) is None
+    assert charts._axis_min({'series': [{'type': 'line', 'values': [-5, 10]}]}) is None
+    # 2) 环比热力 → piecewise 七档（ECharts + mpl 双 sink 不抛错）
+    spec = charts.prep_district_mom(metrics.district_mom(load.load_district()))
+    vm = charts.to_echarts(spec)['visualMap']
+    assert vm['type'] == 'piecewise' and len(vm['splitList']) == 7
+    with tempfile.TemporaryDirectory() as tmp:
+        charts.write_chart(spec, out_dir=tmp)
+        assert os.path.getsize(os.path.join(tmp, 'district_mom.png')) > 0
+    # 3) 红框说明：md 图注置首自解释，近10周表含'估N天'标记
+    md = open('report/trend_report.md', encoding='utf-8').read()
+    assert '红框柱=该周含回推估算日' in md
+    assert '估1天' in md or '估2天' in md or '含回推估算日' in md
+    # 4) 纯线图 option 落了自适应 min（如年度锚点 < 数据最小值）
+    anchor = charts.prep_annual_anchor(metrics.annual_anchor(load.load_monthly(), load.load_annual()))
+    lo = min(v for v in anchor['series'][0]['values'] if v is not None)
+    assert charts.to_echarts(anchor)['yAxis'][0]['min'] < lo
 
 
 def main():

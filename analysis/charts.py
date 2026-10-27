@@ -127,6 +127,25 @@ def _first_non_null(*seqs):
     return 0
 
 
+def _axis_min(spec):
+    """无柱序列轴的自适应下限（用户口径：纯线图数据大时曲线别贴地）。
+
+    显式 spec.y_min 优先；轴上有柱序列→None（柱长编码数值，禁 0 基线截断）；
+    含 0/负值的序列→None。否则取 数据最小值 − max(极差6%, 最小值2%)。
+    """
+    if spec.get('y_min') is not None:
+        return spec['y_min']
+    series = spec.get('series', [])
+    if any(s.get('type') == 'bar' and not s.get('axis') for s in series):
+        return None
+    vals = [v for s in series if not s.get('axis')
+            for v in s.get('values', []) if not _isna(v)]
+    if not vals or min(vals) <= 0:
+        return None
+    lo, hi = min(vals), max(vals)
+    return round(lo - max((hi - lo) * 0.06, lo * 0.02), 2)
+
+
 def _date_axis(dates, fontsize=9):
     """日/周类日期 x 轴：'%m/%d' 标签 + 45° + 稀疏刻度（>12 点每 n//12 取一）。
 
@@ -137,20 +156,18 @@ def _date_axis(dates, fontsize=9):
 
 
 def _heat_bounds(spec, values):
-    """热力色阶边界（单一规则，双 sink 共用）：
+    """连续热力色阶边界（单一规则，双 sink 共用）：[0, vmax]，尊重 spec.vmax。
 
-    diverging → 对称 [-A, A]（A=|值|最大，尊重 spec.vmax）；否则 [0, vmax]。
+    环比类分档色（piecewise）不走此路径，见 _PIECE_BOUNDS。
     """
     vmax = spec.get('vmax')
     if vmax is None:
         arr = np.asarray([v for v in values if not _isna(v)], dtype=float)
         if arr.size == 0:
             return 0.0, 1.0
-        vmax = float(np.max(np.abs(arr) if spec.get('diverging') else arr))
+        vmax = float(np.max(arr))
         if not vmax:
             vmax = 1.0
-    if spec.get('diverging'):
-        return -float(vmax), float(vmax)
     return 0.0, float(vmax)
 
 
@@ -220,8 +237,9 @@ def _ec_bars_lines(spec):
     if has_right:
         axes.append({'type': 'value', 'name': spec.get('right', {}).get('label', '')})
     opt['yAxis'] = axes
-    if spec.get('y_min') is not None:
-        axes[0]['min'] = spec['y_min']      # 用户验收：套均面积等图 y 轴定底，免曲线过平
+    _amin = _axis_min(spec)                 # 纯线轴自适应下限（柱轴保持 0 基线）
+    if _amin is not None:
+        axes[0]['min'] = _amin
     ri = len(axes) - 1 if has_right else 0
     series = []
     for s in spec['series']:
@@ -263,24 +281,37 @@ def _ec_stacked_area(spec):
     return opt
 
 
+# 环比类热力分档（用户反馈：线性均分把中位 |环比|12.5% 压在近白区，色阶浪费）。
+# 语义七档：平稳(±5) / 明显(5-20) / 强(20-50) / 剧烈(>50)，极值饱和、格内数值为准。
+_PIECE_BOUNDS = [-50, -20, -5, 5, 20, 50]
+_PIECE_COLORS = ['#8c4a08', '#e6550d', '#f6b58a', '#ffffff', '#b5dfbd', '#31a354', '#1b6e40']
+
+
 def _ec_heatmap(spec):
     cols, rows = spec['x']['labels'], spec['y']['labels']
     data = [[j, i, float(v)]
             for i, row in enumerate(spec['matrix'])
             for j, v in enumerate(row) if not _isna(v)]
-    vmin, vmax = _heat_bounds(spec, [d[2] for d in data])
     opt = _ec_base(spec, 'item')
     opt['legend'] = {'show': False}
     opt['grid'] = {'top': 56, 'left': 90, 'right': 90, 'bottom': 64, 'containLabel': False}
     opt['xAxis'] = [{'type': 'category', 'data': cols, 'splitArea': {'show': True}}]
     opt['yAxis'] = [{'type': 'category', 'data': rows, 'splitArea': {'show': True}}]
-    opt['visualMap'] = {
-        'min': vmin, 'max': vmax, 'calculable': True,
-        'orient': 'horizontal', 'left': 'center', 'bottom': 0,
-        'inRange': {'color': ([PALETTE['down'], '#ffffff', PALETTE['up']]
-                              if spec.get('diverging') else
-                              [PALETTE['heat_low'], PALETTE['heat_high']])},
-    }
+    if spec.get('piecewise'):
+        edges = [-1e9] + _PIECE_BOUNDS + [1e9]
+        opt['visualMap'] = {
+            'type': 'piecewise',
+            'splitList': [{'min': edges[i], 'max': edges[i + 1],
+                           'color': _PIECE_COLORS[i]} for i in range(len(_PIECE_COLORS))],
+            'orient': 'horizontal', 'left': 'center', 'bottom': 0,
+        }
+    else:
+        vmin, vmax = _heat_bounds(spec, [d[2] for d in data])
+        opt['visualMap'] = {
+            'min': vmin, 'max': vmax, 'calculable': True,
+            'orient': 'horizontal', 'left': 'center', 'bottom': 0,
+            'inRange': {'color': [PALETTE['heat_low'], PALETTE['heat_high']]},
+        }
     # 注意：heatmap 的字符串模板 '{c}' 会渲染成 "[x,y,v]" 三元组（ECharts 行为），
     # 故 label 不带 formatter，用默认（只显示数值）；单位由标题/色条承载。
     opt['series'] = [{
@@ -389,8 +420,9 @@ def _mpl_bars_lines(spec):
     _mpl_xticks(ax1, spec)
     if spec.get('left', {}).get('label'):
         ax1.set_ylabel(spec['left']['label'])
-    if spec.get('y_min') is not None:
-        ax1.set_ylim(bottom=spec['y_min'])
+    _amin = _axis_min(spec)
+    if _amin is not None:
+        ax1.set_ylim(bottom=_amin)
     if ax2 is not None:
         if spec.get('right', {}).get('label'):
             ax2.set_ylabel(spec['right']['label'])
@@ -421,8 +453,9 @@ def _mpl_lines(spec):
     _mpl_xticks(ax, spec)
     if spec.get('left', {}).get('label'):
         ax.set_ylabel(spec['left']['label'])
-    if spec.get('y_min') is not None:
-        ax.set_ylim(bottom=spec['y_min'])
+    _amin = _axis_min(spec)
+    if _amin is not None:
+        ax.set_ylim(bottom=_amin)
     if spec.get('tick_decimals') is not None:
         ax.yaxis.set_major_formatter(
             plt.FuncFormatter(lambda v, _p, d=spec['tick_decimals']: f'{v:.{d}f}'))
@@ -467,14 +500,19 @@ def _mpl_heatmap(spec):
     nrow, ncol = mat.shape
     figsize = spec.get('figsize') or (max(5.5, 1.9 * ncol + 2.2), max(3.2, 0.8 * nrow + 1.6))
     fig, ax = plt.subplots(figsize=figsize)
-    cmap = LinearSegmentedColormap.from_list('blues', [PALETTE['heat_low'], PALETTE['heat_high']])
-    cmap.set_bad('#f0f0f0')   # NaN 格浅灰（区别于数值低的浅蓝）
-    vmin, vmax = _heat_bounds(spec, mat.flatten())
-    if spec.get('diverging'):  # 环比类：橙-白-绿对称色阶
-        cmap = LinearSegmentedColormap.from_list(
-            'div', [PALETTE['down'], '#ffffff', PALETTE['up']])
+    if spec.get('piecewise'):
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+        edges = [-1e9] + _PIECE_BOUNDS + [1e9]
+        cmap = ListedColormap(_PIECE_COLORS)
         cmap.set_bad('#f0f0f0')
-    im = ax.imshow(mat, aspect='auto', cmap=cmap, vmin=vmin, vmax=vmax)
+        # vmax 仅供格内文字黑/白配色阈值（分档色阶不使用连续边界）
+        vmax = float(np.nanmax(np.abs(mat))) if not np.all(np.isnan(mat)) else 1.0
+        im = ax.imshow(mat, aspect='auto', cmap=cmap, norm=BoundaryNorm(edges, len(_PIECE_COLORS)))
+    else:
+        cmap = LinearSegmentedColormap.from_list('blues', [PALETTE['heat_low'], PALETTE['heat_high']])
+        cmap.set_bad('#f0f0f0')   # NaN 格浅灰（区别于数值低的浅蓝）
+        vmin, vmax = _heat_bounds(spec, mat.flatten())
+        im = ax.imshow(mat, aspect='auto', cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_xticks(range(ncol))
     ax.set_xticklabels(cols, rotation=0)
     ax.set_yticks(range(nrow))
@@ -886,9 +924,8 @@ def prep_district_mom(mom_wide):
         return None
     mat = mom_wide.round(1)
     return {
-        'name': 'district_mom', 'kind': 'heatmap', 'diverging': True,
-        'vmax': 100,  # 色阶截断 ±100%：防春节反弹等极值把多数格压成近白（数据分析师评审建议）
-        'title': '各区签约套数月度环比%（绿=涨 橙=跌 白=0；首月无环比；色阶截断±100%）',
+        'name': 'district_mom', 'kind': 'heatmap', 'piecewise': True,
+        'title': '各区签约套数月度环比%（绿=涨 橙=跌；分档 ±5/±20/±50%，超档饱和、格内数值为准）',
         'x': {'labels': _period_labels(list(mat.columns))},
         'y': {'labels': [str(i) for i in mat.index]},
         'matrix': mat.values.tolist(),

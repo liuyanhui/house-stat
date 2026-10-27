@@ -246,16 +246,20 @@ def generate():
                   f'{weekly["week_start"].iloc[-1].date()}）。周度粒度比月度更能反映短期动能。\n')
         md.append(f'\n![周度趋势]({imgs["weekly"]})\n')
         est_total = int((weekly['est_days'] > 0).sum()) if 'est_days' in weekly.columns else 0
-        est_note_chart = f'红框柱=含估算日的周（共 {est_total} 周，明细见数据说明）。' if est_total else ''
-        md.append('\n*柱=周度套数，红线=4 周移动均值，绿线=周度面积（右轴）。'
-                  f'橙色柱表示该周天数 <7（节假日/抓取缺口），数值偏低（共 {partial_n} 周）。'
-                  f'{est_note_chart}*\n')
+        est_note_chart = (f'**红框柱=该周含回推估算日（非真实观测）**，共 {est_total} 周，'
+                          '明细见"数据说明"；' if est_total else '')
+        md.append('\n*' + est_note_chart
+                  + '橙柱=不满 7 天（节假日/缺口，数值偏低）；'
+                  + '红线=4 周移动均值，绿线=周度面积（右轴）。'
+                  + f'（不完整周共 {partial_n} 周）*\n')
         md.append('\n### 近 10 周\n')
         wrows = []
         for _, r in weekly.iloc[::-1].head(10).iterrows():
             mark = ' ⚠️' if r['days'] < 7 else ''
+            est_mark = f"·估{int(r['est_days'])}天" if r.get('est_days', 0) else ''
             wrows.append([r['week_start'].strftime('%Y-%m-%d'), f"{int(r['套数']):,}",
-                          f"{r['面积']:,.0f}", f"{r['套均面积']:.1f}", f"{int(r['days'])}{mark}"])
+                          f"{r['面积']:,.0f}", f"{r['套均面积']:.1f}",
+                          f"{int(r['days'])}{mark}{est_mark}"])
         md.append(_table(['周起始(周一)', '住宅网签(套)', '住宅面积(m²)', '套均(m²)', '天数'], wrows))
         md.append(wk_note)
 
@@ -297,9 +301,9 @@ def generate():
     if imgs.get('d_mom'):
         md.append('\n### 各区月度环比热力\n')
         md.append(f'![各区环比]({imgs["d_mom"]})\n')
-        md.append('\n*各区签约套数月度环比%（发散色：绿=涨、橙=跌、白=0；首月无环比）。'
-                  '环比受季节性影响显著（春节 2→3 月普遍反弹，勿读作结构性回暖）；'
-                  '色阶截断于 ±100%（超限格以数值为准）。'
+        md.append('\n*各区签约套数月度环比%（分档配色：绿=涨、橙=跌、白=平稳；档位 ±5%/±20%/±50%，'
+                  '超 ±50% 饱和进端档、格内数值为准；首月无环比）。'
+                  '环比受季节性影响显著（春节 2→3 月普遍反弹，勿读作结构性回暖）。'
                   '区县数据为月度粒度——官方不发布区县×周数据，此为最细可用粒度。*\n')
 
     # 市场结构
