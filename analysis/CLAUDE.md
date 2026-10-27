@@ -22,7 +22,7 @@
 图表引擎：**ChartSpec 单一来源 → 双 sink**。spec 为纯 dict（kind/series/axes/annotations），拟合/均线/份额一律 prep 算好，sink 只画不算。
 - kind 家族：`bars_lines`（双轴/正负着色/逐柱着色）、`lines`、`stacked_area`（100% 份额 prep 预计算，禁 percent 栈）、`heatmap`、`smallmul`。
 - `write_chart(spec)`：产 `<stem>.png` + `charts/<stem>.json`（同 stem 契约；JSON={name,kind,height,option}，**option 为 Python 算好的完整 ECharts 配置**，NaN→None、allow_nan=False、禁函数）。
-- `prep_*` 16 个（与 `verify.CHART_STEMS` 一一对应，`test_chart_stems_registry` 强制同步）：city_trend / seasonality / avg_unit_area / weekly_trend / weekly_avg_area / district_stacked / district_share / district_smallmul / area_segment_count / area_segment_share / cum_view / structure_share / new_weekly / resale_vs_new / new_inventory / district_mom。
+- `prep_*` 19 个（与 `verify.CHART_STEMS` 一一对应，`test_chart_stems_registry` 强制同步）：city_trend / seasonality / avg_unit_area / weekly_trend / weekly_avg_area / district_stacked / district_share / district_smallmul / area_segment_count / area_segment_share / cum_view / structure_share / new_weekly / resale_vs_new / new_inventory / district_mom / annual_anchor / agency_top / refund_rate。
 - 调色板单一来源：根 `palette.py`（PALETTE + DISTRICT_COLORS，matplotlib/ECharts 共用）。
 - 迁移期像素比对工具：`tests/pixel_diff.py`（超容差→人工复核记录）。
 

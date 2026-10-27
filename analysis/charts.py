@@ -887,7 +887,8 @@ def prep_district_mom(mom_wide):
     mat = mom_wide.round(1)
     return {
         'name': 'district_mom', 'kind': 'heatmap', 'diverging': True,
-        'title': '各区签约套数月度环比%（绿=涨 橙=跌 白=0；首月无环比）',
+        'vmax': 100,  # 色阶截断 ±100%：防春节反弹等极值把多数格压成近白（数据分析师评审建议）
+        'title': '各区签约套数月度环比%（绿=涨 橙=跌 白=0；首月无环比；色阶截断±100%）',
         'x': {'labels': _period_labels(list(mat.columns))},
         'y': {'labels': [str(i) for i in mat.index]},
         'matrix': mat.values.tolist(),
