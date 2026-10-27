@@ -163,6 +163,8 @@ def _ec_bars_lines(spec):
     if has_right:
         axes.append({'type': 'value', 'name': spec.get('right', {}).get('label', '')})
     opt['yAxis'] = axes
+    if spec.get('y_min') is not None:
+        axes[0]['min'] = spec['y_min']      # 用户验收：套均面积等图 y 轴定底，免曲线过平
     ri = len(axes) - 1 if has_right else 0
     series = []
     for s in spec['series']:
@@ -222,10 +224,11 @@ def _ec_heatmap(spec):
         'orient': 'horizontal', 'left': 'center', 'bottom': 0,
         'inRange': {'color': [PALETTE['heat_low'], PALETTE['heat_high']]},
     }
-    suffix = '%' if spec.get('value_fmt') == 'pct' else ''
+    # 注意：heatmap 的字符串模板 '{c}' 会渲染成 "[x,y,v]" 三元组（ECharts 行为），
+    # 故 label 不带 formatter，用默认（只显示数值）；单位由标题/色条承载。
     opt['series'] = [{
         'type': 'heatmap', 'data': data,
-        'label': {'show': True, 'formatter': '{c}' + suffix},
+        'label': {'show': True},
     }]
     return opt
 
@@ -329,6 +332,8 @@ def _mpl_bars_lines(spec):
     _mpl_xticks(ax1, spec)
     if spec.get('left', {}).get('label'):
         ax1.set_ylabel(spec['left']['label'])
+    if spec.get('y_min') is not None:
+        ax1.set_ylim(bottom=spec['y_min'])
     if ax2 is not None:
         if spec.get('right', {}).get('label'):
             ax2.set_ylabel(spec['right']['label'])
@@ -359,6 +364,11 @@ def _mpl_lines(spec):
     _mpl_xticks(ax, spec)
     if spec.get('left', {}).get('label'):
         ax.set_ylabel(spec['left']['label'])
+    if spec.get('y_min') is not None:
+        ax.set_ylim(bottom=spec['y_min'])
+    if spec.get('tick_decimals') is not None:
+        ax.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda v, _p, d=spec['tick_decimals']: f'{v:.{d}f}'))
     if spec.get('title'):
         ax.set_title(spec['title'], fontsize=13, fontweight='bold')
     if any(s.get('name') for s in spec['series']):
@@ -551,7 +561,11 @@ def prep_weekly_trend(weekly):
 
 
 def prep_avg_area_trend(aua):
-    """chart3 套均面积：折线 + 线性趋势虚线（拟合在此算好）。"""
+    """chart3 套均面积：折线 + 线性趋势虚线（拟合在此算好）。
+
+    y 轴自 80 起 + 数值 2 位小数（用户验收意见：曲线过平，定底抬高区分度；
+    图注同步标注截断起点，保持读图诚实）。
+    """
     if aua is None or aua.empty:
         return None
     df = aua.sort_values('period').reset_index(drop=True)
@@ -563,10 +577,11 @@ def prep_avg_area_trend(aua):
         'title': '套均成交面积趋势（数值↑=改善化，↓=刚需化）', 'figsize': (11, 4),
         'x': {'labels': _period_labels(df['period'].tolist()), 'rot': 45},
         'left': {'label': '套均面积 (m²)'},
+        'y_min': 80, 'tick_decimals': 2,
         'series': [
-            {'type': 'line', 'name': '套均面积', 'values': y.tolist(),
+            {'type': 'line', 'name': '套均面积', 'values': [round(v, 2) for v in y.tolist()],
              'color': PALETTE['structure'], 'marker': True, 'lw': 2},
-            {'type': 'line', 'name': '线性趋势', 'values': fit.tolist(),
+            {'type': 'line', 'name': '线性趋势', 'values': [round(v, 2) for v in fit.tolist()],
              'color': PALETTE['trend_fit'], 'dashed': True, 'lw': 1.5},
         ],
         'annotations': {},
@@ -610,6 +625,7 @@ def prep_weekly_avg_area(weekly):
         'x': {'labels': [d.strftime('%m/%d') for d in full['week_start']],
               'rot': 45, 'fontsize': 8, 'tick_step': step},
         'left': {'label': '套均面积 (m²)'},
+        'y_min': 80, 'tick_decimals': 2,
         'series': [
             {'type': 'line', 'name': '套均面积', 'values': y.tolist(),
              'color': PALETTE['structure'], 'marker': True, 'marker_size': 3,
@@ -690,8 +706,16 @@ def prep_district_smallmul(district):
 
 
 def prep_cum_view(monthly_cum):
-    """R5 累计视角：滚动12月总和线（左）+ 累计同比柱（右，正负着色、等窗）。"""
+    """R5 累计视角：滚动12月总和线（左）+ 累计同比柱（右，正负着色、等窗）。
+
+    前导全空段裁剪（用户验收：TTM 首点前左半空白无信息，从首个有值月起画）。
+    """
     df = monthly_cum.sort_values('period').reset_index(drop=True)
+    ttm = df['TTM套数'].tolist()
+    ytd = df['YTD同比'].tolist()
+    start = next((i for i in range(len(df))
+                  if not _isna(ttm[i]) or not _isna(ytd[i])), 0)
+    df = df.iloc[start:].reset_index(drop=True)
     return {
         'name': 'cum_view', 'kind': 'bars_lines',
         'title': '累计视角：滚动12月网签（左）与累计同比（右）', 'figsize': (11, 4.5),

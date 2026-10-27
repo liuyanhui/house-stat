@@ -164,6 +164,7 @@ def generate():
     md.append(f'\n![季节性]({imgs["season"]})\n')
     md.append('\n*年×月热力图。注意 2 月（春节）通常塌量、3-4 月及年末冲量——属季节性，勿误读为趋势拐点。*\n')
     md.append(f'\n![套均面积]({imgs["avgarea"]})\n')
+    md.append('\n*y 轴自 80 m² 起（放大区间差异），数值保留 2 位小数。*\n')
 
     md.append('\n### 月度明细\n')
     rows = []
@@ -233,7 +234,7 @@ def generate():
                 first_aua, last_aua = full_wk['套均面积'].iloc[0], full_wk['套均面积'].iloc[-1]
                 aua_dir = '上升（趋于改善）' if last_aua > first_aua else '下降（趋于刚需）'
             md.append(f'\n![周度套均面积]({imgs["weekly_aua"]})\n')
-            md.append('\n*周度套均面积（仅画满 ≥6 天的周）。面积段分月只有少数点，'
+            md.append('\n*周度套均面积（仅画满 ≥6 天的周；y 轴自 80 起）。面积段分月只有少数点，'
                       '套均面积可连续观察"成交往大还是往小走"。'
                       f'区间走势：{aua_dir}。*\n')
     else:

@@ -95,9 +95,9 @@ th {{ background:var(--accent-light); color:var(--fg); font-weight:bold;
   border-bottom:2px solid var(--accent); }}
 tbody tr:nth-child(even) {{ background:#fafbfc; }}
 tbody tr:hover {{ background:var(--accent-light); }}
-/* 可排序表：纵向滚动 + 表头吸顶（sticky 须在滚动容器内才生效） */
-.table-wrap.sortable {{ max-height:520px; overflow:auto; }}
-.table-wrap.sortable thead th {{ position:sticky; top:0; z-index:1; cursor:pointer; }}
+/* 可排序表：表头可点击（用户验收：不用内嵌滚动条，由页面自然滚动；
+   宽表横向滚动仍保留——11 列面积段表无法压进容器宽） */
+.table-wrap.sortable thead th {{ cursor:pointer; }}
 .table-wrap.sortable thead th:hover {{ filter:brightness(0.96); }}
 /* 图表容器（ECharts 注入位，视觉与 img 一致） */
 .chart {{ width:100%; margin:1.2em auto; border:1px solid var(--border);

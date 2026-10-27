@@ -632,6 +632,26 @@ def test_ttm_ytd_share():
     assert ((ok > 0) & (ok < 100)).all()
 
 
+def test_ui_fixes():
+    """用户验收修复（2026-10-27）：热力图默认标签/套均 y_min=80/累计视角裁前导空。"""
+    from analysis import load, metrics, charts
+    # 热力图 label 无 '{c}' formatter（三元组问题，三张热力统一）
+    for spec in (charts.prep_seasonality(load.load_monthly()),
+                 charts.prep_area_segment_count(load.load_area())):
+        assert 'formatter' not in charts.to_echarts(spec)['series'][0]['label']
+    # 套均面积：y_min 80 + 数值 2 位小数
+    s = charts.prep_avg_area_trend(metrics.avg_unit_area(load.load_monthly()))
+    assert s['y_min'] == 80 and s['tick_decimals'] == 2
+    assert all(round(v, 2) == v for v in s['series'][0]['values'])
+    opt = charts.to_echarts(s)
+    assert opt['yAxis'][0]['min'] == 80
+    # 累计视角：首点即有数据（前导全空已裁）
+    m_cum = metrics.add_ytd(metrics.add_ttm(
+        metrics.sanitize_bad_values(metrics.add_yoy_mom(load.load_monthly()))))
+    c = charts.prep_cum_view(m_cum)
+    assert c['series'][0]['values'][0] is not None
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ''
     tests = [(n, f) for n, f in sorted(globals().items())
