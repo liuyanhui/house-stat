@@ -48,7 +48,7 @@
 
 | 函数 | 说明 |
 |------|------|
-| `validate_integrity(data_dir=None, logger=None)` | 三类规则：① `area_monthly`/`price_monthly` 各段成交加总 ≈ `district_monthly` 全市（阈值 5%）；② `resale_monthly` 住宅 ≤ 总计；③ 日度加总 vs 月度对账（仅日度完整覆盖月份，阈值 0.5%）。`KNOWN_ISSUES` 白名单内的存量异常不算失败。返回 `(ok, issues)`。`main.py` 抓取后调用，不一致 `sys.exit(1)`。 |
+| `validate_integrity(data_dir=None, logger=None)` | 三类规则：① `area_monthly`/`price_monthly` 各段成交加总 ≈ `district_monthly` 全市（阈值 5%）；② `resale_monthly` 住宅 ≤ 总计；③ 日度加总 vs 月度对账（仅日度完整覆盖月份，阈值 0.5%）。`KNOWN_ISSUES` 白名单（单一来源在根 `quality.py`，2026-10 迁出本文件）内的存量异常不算失败。返回 `(ok, issues)`。`main.py` 抓取后调用，不一致 `sys.exit(1)`。 |
 | `check_monthly_feeds(year_month, feeds, logger=None)` | 断流门：月度表本次解析为空且页面年月新于库内最新 → 返回失败（`feeds: {数据名: (df, csv路径)}`）。`main.py` 解析后调用，失败非零退出。 |
 | `check_daily_freshness(data_dir=None, logger=None, today=None)` | 滞后告警：`resale_daily`/`new_daily` 最新日期早于昨天 → 返回告警列表，仅告警不阻断。`today` 可注入便于测试。 |
 | `check_known_issues(data_dir=None)` | 返回当前数据中仍存在的白名单历史异常（如 2025-01 总面积<住宅面积），供校验脚本提示。 |

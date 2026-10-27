@@ -15,7 +15,7 @@ python script/analyze.py                       # 控制台文本分析（月度/
 python script/analyze.py --data-dir /path      # 指定数据目录
 ```
 
-`--report` 调用 `analysis.report.generate()` 产 `report/trend_report.md` + 10 张 PNG，再调 `analysis.html_render` 产自包含 `report/trend_report.html`（图片 base64 内嵌），完成后自动用默认浏览器打开该 HTML。无参数走原控制台逻辑（`classify_day_type` 用 `chinese_calendar` 法定日历）。
+`--report` 调用 `analysis.report.generate()`（干净房间：先清旧图表产物）产 `report/trend_report.md` + 19 张 PNG + charts/*.json + kpi/quality.json，再调 `analysis.html_render` 产自包含交互 `report/trend_report.html`（ECharts 内嵌；`DASHBOARD_NO_JS=1` 退纯图），随后跑 `analysis.verify` 验收门——**通过才自动开浏览器；失败把 HTML 隔离为 `*.bad` 并非零退出**。无参数走原控制台逻辑（`classify_day_type` 用 `chinese_calendar` 法定日历）。
 
 **依赖**：`pandas`、`numpy`、`matplotlib`、`chinese_calendar`（见 requirements.txt）。
 
