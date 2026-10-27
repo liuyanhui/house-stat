@@ -283,7 +283,7 @@ def test_verify_gate():
                 f.write(b'x')
             with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
                 _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': []}}, f)
+                            'option': {'series': [{'type': 'bar', 'data': [12345]}]}}, f)
         city = {'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
                 'option': {'series': [{'type': 'bar', 'data': [1, last_units]}]}}
         if tamper == 'nan':
@@ -300,10 +300,10 @@ def test_verify_gate():
     with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data:
         with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
             f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
-                    '2026-08,1,1,1,1\n2026-09,2,2,12345,2\n')
+                    '2026-08,1,1,0,1\n2026-09,2,2,12345,2\n')
         build(tmp, 12345)
         ok, issues = verify.check(tmp, data)
-        assert ok, issues                       # 全对 → 过
+        assert ok, issues                       # 全对 → 过（TTM 独立重算=0+12345）
         build(tmp, 99999)                       # 锚点错 → 抓住
         ok, issues = verify.check(tmp, data)
         assert not ok and any('锚点不符' in i for i in issues)
@@ -434,6 +434,12 @@ def test_preps_smoke():
                                            'heatmap', 'smallmul')
         assert 'annotations' in s and 'title' in s
         charts.to_echarts(s)
+    # T2.6/R5 两张新图
+    m_cum = metrics.add_ytd(metrics.add_ttm(monthly))
+    for s2 in (charts.prep_cum_view(m_cum),
+               charts.prep_structure_share(metrics.nonresidential_share(monthly))):
+        assert s2 is not None and s2['kind'] in ('bars_lines', 'lines')
+        charts.to_echarts(s2)
 
 
 def test_injection_guards():
@@ -574,6 +580,44 @@ def test_table_sortable():
     assert 'table-wrap sortable' not in plain and 'data-dir' not in plain
     nojs = hr.md_to_html(md, no_js=True)
     assert 'table-wrap sortable' in nojs and 'data-dir' not in nojs
+
+
+def test_ttm_ytd_share():
+    """T2.6/R5：TTM 整窗规则、YTD 等窗、非住宅占比坏值守卫。"""
+    import numpy as np
+    import pandas as pd
+    from analysis import metrics as M
+
+    def mk(rows):
+        return pd.DataFrame({
+            'period': pd.PeriodIndex([f'{y}-{m:02d}' for y, m, _ in rows], freq='M'),
+            'year': [y for y, _, _ in rows], 'month': [m for _, m, _ in rows],
+            '住宅签约套数': [u for *_, u in rows]})
+
+    rows = [(2025, m, 100 + m) for m in range(1, 13)] + [(2026, m, 200 + m) for m in (1, 2)]
+    df = M.add_ttm(mk(rows))
+    assert df['TTM套数'].isna().sum() == 11
+    assert int(df['TTM套数'].iloc[-1]) == sum(u for *_, u in rows[-12:])
+
+    rows2 = [(2025, m, 100) for m in range(1, 13) if m != 6] + [(2026, 1, 100)]
+    assert M.add_ttm(mk(rows2))['TTM套数'].isna().all()   # 断档 → 整列 NaN
+
+    rows3 = [(2025, m, 100) for m in (1, 2, 3)] + [(2026, m, 150) for m in (1, 2, 3)]
+    df3 = M.add_ytd(mk(rows3))
+    v = df3[df3['month'] == 3].iloc[-1]['YTD同比']
+    assert abs(v - (450 - 300) / 300 * 100) < 1e-9
+
+    rows4 = [(2025, m, 100) for m in (1, 3)] + [(2026, m, 150) for m in (1, 2)]
+    df4 = M.add_ytd(mk(rows4))
+    y26 = df4[df4['year'] == 2026].set_index('month')['YTD同比']
+    assert not np.isnan(y26.loc[1])     # 1月对1月：等窗可算
+    assert np.isnan(y26.loc[2])         # 去年缺2月 → 不等窗 NaN
+
+    from analysis import load
+    s = M.nonresidential_share(load.load_monthly())
+    assert np.isnan(s[s['period'].astype(str) == '2025-01']['非住宅面积占比'].iloc[0])
+    ok = s['非住宅套数占比'].dropna()
+    assert ((ok > 0) & (ok < 100)).all()
 
 
 def main():

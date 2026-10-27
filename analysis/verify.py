@@ -25,7 +25,8 @@ HTML_SIZE_LIMIT = 2 * 1024 * 1024
 
 CHART_STEMS = ['city_trend', 'seasonality', 'avg_unit_area', 'weekly_trend',
                'weekly_avg_area', 'district_stacked', 'district_share',
-               'district_smallmul', 'area_segment_count', 'area_segment_share']
+               'district_smallmul', 'area_segment_count', 'area_segment_share',
+               'cum_view', 'structure_share']
 
 _VENDOR_MARKERS = ['heatmap', 'dataZoom', 'toolbox', 'markLine',
                    'visualMap', 'legend', 'tooltip']
@@ -129,5 +130,43 @@ def check(report_dir, data_dir, no_js=False):
             if msum != mtd.get('units') or mrows != mtd.get('days'):
                 issues.append(f'kpi.json mtd 不符: 独立重算 {mtd.get("period")}'
                               f'={msum}/{mrows} 天，json={mtd.get("units")}/{mtd.get("days")}')
+
+    # 7) R5 累计口径独立重算（csv 直读）：TTM 末值=近 12 个连续月套数和；
+    #    YTD 末值=最新年 1..n 月 vs 上年 1..n 月等窗同比
+    cum_js = os.path.join(charts_dir, 'cum_view.json')
+    if os.path.isfile(cum_js):
+        with open(os.path.join(data_dir, 'resale_monthly.csv'), encoding='utf-8-sig') as f:
+            rows_m = list(csv.DictReader(f))
+        payload = json.loads(open(cum_js, encoding='utf-8').read())
+        try:
+            seqs = []
+            for r in rows_m[-12:]:
+                y, m = str(r['月份']).split('-')
+                seqs.append(int(y) * 12 + int(m))
+            if all(b - a == 1 for a, b in zip(seqs, seqs[1:])):
+                ttm_csv = sum(int(r['住宅签约套数']) for r in rows_m[-12:])
+                line = [v for v in payload['option']['series'][0]['data']
+                        if v is not None]
+                if line and abs(line[-1] - ttm_csv) > 0.5:
+                    issues.append(f'TTM 不符: 图末值 {line[-1]} != 独立重算 {ttm_csv}')
+            by = {}
+            for r in rows_m:
+                y, m = str(r['月份']).split('-')
+                by.setdefault(int(y), {})[int(m)] = int(r['住宅签约套数'])
+            ys = sorted(by)
+            if len(ys) >= 2:
+                cy, py_ = ys[-1], ys[-2]
+                n = max(by[cy])
+                if set(by[py_]) >= set(range(1, n + 1)):
+                    c = sum(by[cy][m] for m in range(1, n + 1))
+                    p = sum(by[py_][m] for m in range(1, n + 1))
+                    ytd_csv = (c - p) / p * 100
+                    bvals = [d['value'] if isinstance(d, dict) else d
+                             for d in payload['option']['series'][1]['data']]
+                    bv = [v for v in bvals if v is not None]
+                    if bv and abs(bv[-1] - ytd_csv) > 0.1:
+                        issues.append(f'YTD 不符: 图末值 {bv[-1]:.1f} != 独立重算 {ytd_csv:.1f}')
+        except (KeyError, IndexError, TypeError, ValueError):
+            issues.append('cum_view option 结构异常，累计口径断言无法执行')
 
     return (not issues), issues

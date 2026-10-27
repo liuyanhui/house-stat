@@ -152,6 +152,56 @@ def weekly_aggregate(daily, estimated_dates=None):
     return g.reset_index(drop=True)
 
 
+def add_ttm(monthly, col='住宅签约套数', name='TTM套数'):
+    """滚动 12 月总和（TTM，设计 v1.1 §2.3 / R5）。
+
+    窗口须 12 个月**连续**（run_id 判定，断档整窗 NaN）且值全有效
+    （min_periods=12：窗口内任何 NaN → 整窗 NaN，禁 skipna 剔月洗白）。
+    """
+    df = monthly.copy().sort_values('period').reset_index(drop=True)
+    idx = df['year'] * 12 + df['month']
+    run_id = (idx.diff() != 1).cumsum()
+    ttm = df[col].rolling(12, min_periods=12).sum()
+    same_run = run_id.eq(run_id.shift(11))
+    df[name] = np.where(same_run, ttm, np.nan)
+    return df
+
+
+def add_ytd(monthly, col='住宅签约套数', name='YTD同比'):
+    """累计同比（等窗，R5）：当年 1..n 月累计 vs 去年 1..n 月累计。
+
+    年内缺月或含 NaN → 该年其后累计整段无效（groupby-year cummax 前缀污染），
+    禁不等窗/剔月比较。仅住宅口径出值（总面积恒 NaN 明示，见需求 §4 R5）。
+    """
+    df = monthly.copy().sort_values('period').reset_index(drop=True)
+    df['cum'] = df.groupby('year')[col].cumsum()
+    seq = df.groupby('year').cumcount() + 1
+    bad = df[col].isna() | (df['month'] != seq)
+    bad_prefix = bad.groupby(df['year']).cummax()      # 年内一旦坏，其后全无效
+    df['cum_ok'] = df['cum'].where(~bad_prefix & df[col].notna())
+    prev = (df.assign(py=df['year'] + 1)[['py', 'month', 'cum_ok']]
+            .rename(columns={'py': 'year', 'cum_ok': 'prev_cum'}))
+    df = df.merge(prev, on=['year', 'month'], how='left')
+    df[name] = np.where(
+        df['cum_ok'].notna() & df['prev_cum'].notna() & (df['prev_cum'] > 0),
+        (df['cum_ok'] - df['prev_cum']) / df['prev_cum'] * 100, np.nan)
+    return df.drop(columns=['cum', 'cum_ok', 'prev_cum'])
+
+
+def nonresidential_share(monthly):
+    """非住宅占比（(总−住宅)/总，%）：套数与面积两列（R5）。
+
+    面积侧守卫 总>住宅：2025-01 坏值（总 12.5 万 < 住宅 117 万）直接 NaN，
+    不会算出负占比。
+    """
+    df = monthly.copy()
+    tot_u, sub_u = df['网上签约套数'], df['住宅签约套数']
+    tot_a, sub_a = df['网上签约面积(m2)'], df['住宅签约面积(m2)']
+    df['非住宅套数占比'] = np.where(tot_u > sub_u, (tot_u - sub_u) / tot_u * 100, np.nan)
+    df['非住宅面积占比'] = np.where(tot_a > sub_a, (tot_a - sub_a) / tot_a * 100, np.nan)
+    return df
+
+
 def coverage_counts(monthly, district, area):
     """数据覆盖月数 (月度, 区县, 面积段)——report 与 ai_digest 共用的唯一计数实现。"""
     return (len(monthly),

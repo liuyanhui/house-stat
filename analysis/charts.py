@@ -689,7 +689,43 @@ def prep_district_smallmul(district):
     }
 
 
-_AREA_ORDER = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
+def prep_cum_view(monthly_cum):
+    """R5 累计视角：滚动12月总和线（左）+ 累计同比柱（右，正负着色、等窗）。"""
+    df = monthly_cum.sort_values('period').reset_index(drop=True)
+    return {
+        'name': 'cum_view', 'kind': 'bars_lines',
+        'title': '累计视角：滚动12月网签（左）与累计同比（右）', 'figsize': (11, 4.5),
+        'x': {'labels': _period_labels(df['period'].tolist()), 'rot': 45},
+        'left': {'label': '滚动12月住宅网签(套)'}, 'right': {'label': '累计同比 %'},
+        'series': [
+            {'type': 'line', 'name': '滚动12月总和(TTM)', 'values': df['TTM套数'].tolist(),
+             'color': PALETTE['line_main'], 'lw': 2.2},
+            {'type': 'bar', 'name': '累计同比(等窗)', 'values': df['YTD同比'].tolist(),
+             'axis': 'right', 'sign_color': True, 'alpha': 0.4, 'width': 0.5},
+        ],
+        'annotations': {},
+    }
+
+
+def prep_structure_share(share_df):
+    """R5 非住宅占比（套数/面积两线，%；坏值点缺失不插值）。"""
+    df = share_df.sort_values('period').reset_index(drop=True)
+    return {
+        'name': 'structure_share', 'kind': 'lines',
+        'title': '非住宅占比（总−住宅，%）', 'figsize': (11, 4),
+        'x': {'labels': _period_labels(df['period'].tolist()), 'rot': 45},
+        'left': {'label': '占比 %'},
+        'series': [
+            {'type': 'line', 'name': '非住宅套数占比', 'values': df['非住宅套数占比'].round(2).tolist(),
+             'color': PALETTE['line_aux'], 'marker': True, 'lw': 1.8},
+            {'type': 'line', 'name': '非住宅面积占比', 'values': df['非住宅面积占比'].round(2).tolist(),
+             'color': PALETTE['structure'], 'marker': True, 'lw': 1.8},
+        ],
+        'annotations': {},
+    }
+
+
+_AREA_ORDER = ['60m2以下', '60～80m2', '80～100m2', '120～140m2', '140m2以上']
 
 
 def _area_pivots(area):

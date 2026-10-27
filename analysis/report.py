@@ -72,6 +72,11 @@ def generate():
     imgs['d_sm'] = _chart(charts.prep_district_smallmul(district))
     imgs['area_cnt'] = _chart(charts.prep_area_segment_count(area))
     imgs['area_sh'] = _chart(charts.prep_area_segment_share(area))
+    # R5 累计与非住宅结构（T2.6）：TTM/YTD 基于消毒后的月度（2025-01 面积坏值→整窗 NaN）
+    monthly_s = metrics.sanitize_bad_values(monthly_yoy)
+    m_cum = metrics.add_ytd(metrics.add_ttm(monthly_s))
+    imgs['cum'] = _chart(charts.prep_cum_view(m_cum))
+    imgs['share'] = _chart(charts.prep_structure_share(metrics.nonresidential_share(monthly_s)))
 
     # 摘要数字
     cur = monthly.iloc[-1]
@@ -169,6 +174,17 @@ def generate():
                      f"{r['住宅签约面积(m2)']/r['住宅签约套数']:.1f}" if r['住宅签约套数'] else '—'])
     md.append(_table(['年月', '住宅网签(套)', '环比', '同比', '住宅面积(m²)', '套均(m²)'], rows))
     md.append('')
+
+    # R5 累计与非住宅结构（T2.6）
+    if imgs.get('cum'):
+        md.append('\n### 累计视角（滚动12月 / 累计同比）\n')
+        md.append(f'![累计视角]({imgs["cum"]})\n')
+        md.append('\n*蓝线=滚动 12 月住宅网签总和（左轴，剥离季节性看水位）；绿/橙柱=累计同比'
+                  '（右轴，等窗口径：当年 1..n 月 vs 去年同期 1..n 月）。*\n')
+    if imgs.get('share'):
+        md.append('\n### 非住宅占比\n')
+        md.append(f'![非住宅占比]({imgs["share"]})\n')
+        md.append('\n*非住宅 = 总量 − 住宅。2025-01 面积口径坏值 → 该点缺失（不插值）。*\n')
 
     # 周度趋势
     md.append('\n## 三、周度成交趋势\n')
