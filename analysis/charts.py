@@ -97,6 +97,44 @@ def _vals(values):
     return np.asarray([np.nan if _isna(v) else float(v) for v in values], dtype=float)
 
 
+def _first_positive(values):
+    """首个 >0 值下标；无则 None（前导空段裁剪用）。"""
+    return next((i for i, v in enumerate(values)
+                 if not _isna(v) and v > 0), None)
+
+
+def _first_non_null(*seqs):
+    """多条序列中首个"任一非空"位置（None/NaN 视为空）；无则 0。"""
+    for i in range(max(len(s) for s in seqs)):
+        if any(i < len(s) and not _isna(s[i]) for s in seqs):
+            return i
+    return 0
+
+
+def _week_axis(dates, fontsize=9):
+    """周类 x 轴配置：'%m/%d' 标签 + 45° + 稀疏刻度（>12 点每 n//12 取一）。"""
+    return {'labels': [d.strftime('%m/%d') for d in dates],
+            'rot': 45, 'fontsize': fontsize, 'tick_step': max(1, len(dates) // 12)}
+
+
+def _heat_bounds(spec, values):
+    """热力色阶边界（单一规则，双 sink 共用）：
+
+    diverging → 对称 [-A, A]（A=|值|最大，尊重 spec.vmax）；否则 [0, vmax]。
+    """
+    vmax = spec.get('vmax')
+    if vmax is None:
+        arr = np.asarray([v for v in values if not _isna(v)], dtype=float)
+        if arr.size == 0:
+            return 0.0, 1.0
+        vmax = float(np.max(np.abs(arr) if spec.get('diverging') else arr))
+        if not vmax:
+            vmax = 1.0
+    if spec.get('diverging'):
+        return -float(vmax), float(vmax)
+    return 0.0, float(vmax)
+
+
 # ---------------------------------------------------------------- ECharts sink
 def _ec_bar_data(s):
     """柱序列 → ECharts data。着色优先级：sign_color > colors（逐柱）> 纯色；
@@ -211,23 +249,19 @@ def _ec_heatmap(spec):
     data = [[j, i, float(v)]
             for i, row in enumerate(spec['matrix'])
             for j, v in enumerate(row) if not _isna(v)]
-    vmax = spec.get('vmax')
-    if vmax is None:
-        vmax = max((d[2] for d in data), default=0)
+    vmin, vmax = _heat_bounds(spec, [d[2] for d in data])
     opt = _ec_base(spec, 'item')
     opt['legend'] = {'show': False}
     opt['grid'] = {'top': 56, 'left': 90, 'right': 90, 'bottom': 64, 'containLabel': False}
     opt['xAxis'] = [{'type': 'category', 'data': cols, 'splitArea': {'show': True}}]
     opt['yAxis'] = [{'type': 'category', 'data': rows, 'splitArea': {'show': True}}]
     opt['visualMap'] = {
-        'min': 0, 'max': vmax, 'calculable': True,
+        'min': vmin, 'max': vmax, 'calculable': True,
         'orient': 'horizontal', 'left': 'center', 'bottom': 0,
         'inRange': {'color': ([PALETTE['down'], '#ffffff', PALETTE['up']]
                               if spec.get('diverging') else
                               [PALETTE['heat_low'], PALETTE['heat_high']])},
     }
-    if spec.get('diverging'):
-        opt['visualMap']['min'] = -vmax
     # 注意：heatmap 的字符串模板 '{c}' 会渲染成 "[x,y,v]" 三元组（ECharts 行为），
     # 故 label 不带 formatter，用默认（只显示数值）；单位由标题/色条承载。
     opt['series'] = [{
@@ -416,13 +450,8 @@ def _mpl_heatmap(spec):
     fig, ax = plt.subplots(figsize=figsize)
     cmap = LinearSegmentedColormap.from_list('blues', [PALETTE['heat_low'], PALETTE['heat_high']])
     cmap.set_bad('#f0f0f0')   # NaN 格浅灰（区别于数值低的浅蓝）
-    vmax = spec.get('vmax')
-    if vmax is None:
-        vmax = np.nanmax(mat) if not np.all(np.isnan(mat)) else 1.0
-    vmin = 0
+    vmin, vmax = _heat_bounds(spec, mat.flatten())
     if spec.get('diverging'):  # 环比类：橙-白-绿对称色阶
-        vmax = float(np.nanmax(np.abs(mat))) or 1.0
-        vmin = -vmax
         cmap = LinearSegmentedColormap.from_list(
             'div', [PALETTE['down'], '#ffffff', PALETTE['up']])
         cmap.set_bad('#f0f0f0')
@@ -550,12 +579,10 @@ def prep_weekly_trend(weekly):
     partial = (wk['days'] < 7)
     est_idx = [i for i, e in enumerate((wk['est_days'] > 0).tolist()) if e] \
         if 'est_days' in wk.columns else []
-    step = max(1, len(wk) // 12)
     return {
         'name': 'weekly_trend', 'kind': 'bars_lines',
         'title': '北京二手住宅 周度成交趋势', 'figsize': (12, 5),
-        'x': {'labels': [d.strftime('%m/%d') for d in wk['week_start']],
-              'rot': 45, 'fontsize': 8, 'tick_step': step},
+        'x': _week_axis(wk['week_start'].tolist(), fontsize=8),
         'left': {'label': '住宅网签套数'}, 'right': {'label': '住宅网签面积 (万m²)'},
         'series': [
             {'type': 'bar', 'name': '周度套数（橙=该周天数<7）', 'values': wk['套数'].tolist(),
@@ -571,7 +598,7 @@ def prep_weekly_trend(weekly):
     }
 
 
-def prep_avg_area_trend(aua):
+def prep_avg_unit_area(aua):
     """chart3 套均面积：折线 + 线性趋势虚线（拟合在此算好）。
 
     y 轴自 80 起 + 数值 2 位小数（用户验收意见：曲线过平，定底抬高区分度；
@@ -629,12 +656,10 @@ def prep_weekly_avg_area(weekly):
     x = np.arange(len(full))
     y = full['套均面积'].values
     fit = np.poly1d(np.polyfit(x, y, 1))(x) if len(full) >= 2 else np.full_like(y, np.nan)
-    step = max(1, len(full) // 12)
     return {
         'name': 'weekly_avg_area', 'kind': 'lines',
         'title': '周度套均成交面积趋势（↑改善化 / ↓刚需化）', 'figsize': (12, 4.2),
-        'x': {'labels': [d.strftime('%m/%d') for d in full['week_start']],
-              'rot': 45, 'fontsize': 8, 'tick_step': step},
+        'x': _week_axis(full['week_start'].tolist(), fontsize=8),
         'left': {'label': '套均面积 (m²)'},
         'y_min': 80, 'tick_decimals': 2,
         'series': [
@@ -724,9 +749,7 @@ def prep_cum_view(monthly_cum):
     df = monthly_cum.sort_values('period').reset_index(drop=True)
     ttm = df['TTM套数'].tolist()
     ytd = df['YTD同比'].tolist()
-    start = next((i for i in range(len(df))
-                  if not _isna(ttm[i]) or not _isna(ytd[i])), 0)
-    df = df.iloc[start:].reset_index(drop=True)
+    df = df.iloc[_first_non_null(ttm, ytd):].reset_index(drop=True)
     return {
         'name': 'cum_view', 'kind': 'bars_lines',
         'title': '累计视角：滚动12月网签（左）与累计同比（右）', 'figsize': (11, 4.5),
@@ -765,17 +788,15 @@ def prep_new_weekly(nw):
     if nw is None or nw.empty:
         return None
     g = nw.copy()
-    first = next((i for i, v in enumerate(g['签约住宅'].tolist()) if v > 0), None)
+    first = _first_positive(g['签约住宅'].tolist())
     if first is None:
         return None
     g = g.iloc[first:].reset_index(drop=True)
     partial = g['days'] < 7
-    step = max(1, len(g) // 12)
     return {
         'name': 'new_weekly', 'kind': 'bars_lines',
         'title': '新房住宅周度认购与签约（期房+现房）', 'figsize': (11, 4.5),
-        'x': {'labels': [d.strftime('%m/%d') for d in g['week_start']],
-              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'x': _week_axis(g['week_start'].tolist()),
         'left': {'label': '住宅套数'},
         'series': [
             {'type': 'bar', 'name': '周签约住宅（橙=不完整周）', 'values': g['签约住宅'].tolist(),
@@ -796,20 +817,18 @@ def prep_resale_vs_new(weekly, nw):
         return None
     w = weekly[['week_start', '套数']].copy()
     n = nw.copy()
-    first = next((i for i, v in enumerate(n['签约住宅'].tolist()) if v > 0), None)
+    first = _first_positive(n['签约住宅'].tolist())
     if first is None:
         return None
     n = n.iloc[first:]
     m = w.merge(n[['week_start', '签约住宅', '认购住宅']], on='week_start', how='inner')
     if m.empty:
         return None
-    step = max(1, len(m) // 12)
     return {
         'name': 'resale_vs_new', 'kind': 'lines',
         'title': '二手 vs 新房：住宅周度成交对照（新房序列自 2026-08 下旬起）',
         'figsize': (11, 4.5),
-        'x': {'labels': [d.strftime('%m/%d') for d in m['week_start']],
-              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'x': _week_axis(m['week_start'].tolist()),
         'left': {'label': '住宅套数'},
         'series': [
             {'type': 'line', 'name': '二手住宅周网签', 'values': m['套数'].tolist(),
@@ -828,13 +847,11 @@ def prep_new_inventory(inv):
     if inv is None or inv.empty:
         return None
     df = inv.sort_values('日期').reset_index(drop=True)
-    step = max(1, len(df) // 12)
     return {
         'name': 'new_inventory', 'kind': 'lines',
         'title': '新房住宅库存快照（可售期房住宅 + 未签约现房住宅，万套）',
         'figsize': (11, 4),
-        'x': {'labels': [d.strftime('%m/%d') for d in df['日期']],
-              'rot': 45, 'fontsize': 9, 'tick_step': step},
+        'x': _week_axis(df['日期'].tolist()),
         'left': {'label': '万套'},
         'series': [
             {'type': 'line', 'name': '住宅库存', 'values': (df['库存住宅'] / 1e4).round(3).tolist(),

@@ -65,7 +65,7 @@ def generate():
     imgs = {}
     imgs['city'] = _chart(charts.prep_city_trend(monthly_ma))
     imgs['season'] = _chart(charts.prep_seasonality(monthly))
-    imgs['avgarea'] = _chart(charts.prep_avg_area_trend(aua))
+    imgs['avgarea'] = _chart(charts.prep_avg_unit_area(aua))
     imgs['weekly'] = _chart(charts.prep_weekly_trend(weekly))
     imgs['weekly_aua'] = _chart(charts.prep_weekly_avg_area(weekly))
     imgs['d_stack'] = _chart(charts.prep_district_stacked(district))
@@ -80,9 +80,10 @@ def generate():
     imgs['share'] = _chart(charts.prep_structure_share(metrics.nonresidential_share(monthly_s)))
     # M3 R1/R2（用户 2026-10-27 确认口径）：新房周度三件套 + 区县环比热力
     new_wk = metrics.new_home_weekly(new_daily)
+    inv_df = metrics.new_inventory(new_daily)
     imgs['new_wk'] = _chart(charts.prep_new_weekly(new_wk))
     imgs['resale_new'] = _chart(charts.prep_resale_vs_new(weekly, new_wk))
-    imgs['new_inv'] = _chart(charts.prep_new_inventory(metrics.new_inventory(new_daily)))
+    imgs['new_inv'] = _chart(charts.prep_new_inventory(inv_df))
     imgs['d_mom'] = _chart(charts.prep_district_mom(metrics.district_mom(district)))
 
     # 摘要数字
@@ -313,10 +314,9 @@ def generate():
         md.append(_table(header, rows))
         md.append('\n*占比变化为百分点(pp)。正值=该面积段份额上升，负值=下降。*\n')
 
-    # 新房市场（M3 R1/R2，插在数据说明前）
+    # 新房市场（M3 R1/R2，插在数据说明前；守卫与各节一致用 imgs.get）
     md.append('\n## 六、新房市场（认购/签约/库存）\n')
-    if not new_daily.empty:
-        inv_latest = metrics.new_inventory(new_daily).iloc[-1]
+    if any(imgs.get(k) for k in ('new_wk', 'resale_new', 'new_inv')):
         md.append('> 新房认购/签约字段 2026-08-23 起全量（序列尚短，趋势仅作方向参考）；'
                   '2026-09-16 缺失（约定 11）。区县维度官方不发布，全市口径。\n')
         if imgs.get('new_wk'):
@@ -327,7 +327,8 @@ def generate():
             md.append(f'\n![二手vs新房]({imgs["resale_new"]})\n')
             md.append('\n*同窗口对照：蓝=二手住宅周网签，橙=新房周签约（住宅），绿虚线=新房周认购。'
                       '新房序列自 2026-08 下旬起，禁止跨窗口外推。*\n')
-        if imgs.get('new_inv'):
+        if imgs.get('new_inv') and not inv_df.empty:
+            inv_latest = inv_df.iloc[-1]
             md.append(f'\n![新房库存]({imgs["new_inv"]})\n')
             md.append(f'\n*住宅库存快照=可售期房住宅+未签约现房住宅，最新 '
                       f'{inv_latest["库存住宅"] / 1e4:.2f} 万套（{inv_latest["日期"]:%Y-%m-%d}）。'

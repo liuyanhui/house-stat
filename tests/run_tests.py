@@ -23,6 +23,28 @@ make_fixtures = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(make_fixtures)
 
 
+def _write_chart_stubs(tmp):
+    """verify 夹具共用：全 stems 占位 PNG+JSON（structure_share 须 ∈(0,100)）。"""
+    import json as _json
+    import os
+    from analysis import verify
+    os.makedirs(os.path.join(tmp, 'charts'), exist_ok=True)
+    for stem in verify.CHART_STEMS:
+        with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
+            f.write(b'x')
+        vals = [50] if stem == 'structure_share' else [12345]
+        with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
+            _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
+                        'option': {'series': [{'type': 'bar', 'data': vals}]}}, f)
+
+
+def test_chart_stems_registry():
+    """verify.CHART_STEMS 与 charts.prep_* 一一对应（防手抄清单漂移）。"""
+    from analysis import charts, verify
+    preps = {n[5:] for n in dir(charts) if n.startswith('prep_')}
+    assert preps == set(verify.CHART_STEMS), preps ^ set(verify.CHART_STEMS)
+
+
 def test_fixtures_generate_and_read_back():
     """四分支 fixture 可生成、可被 pandas 读回、关键性质成立（行为断言随 T1.2/T1.3 补）。"""
     import pandas as pd
@@ -277,14 +299,7 @@ def test_verify_gate():
 
 
     def build(tmp, last_units, tamper=None):
-        os.makedirs(os.path.join(tmp, 'charts'), exist_ok=True)
-        for stem in verify.CHART_STEMS:
-            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
-                f.write(b'x')
-            data = [50] if stem == 'structure_share' else [12345]   # 占比图须 ∈(0,100)
-            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
-                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': data}]}}, f)
+        _write_chart_stubs(tmp)
         city = {'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
                 'option': {'series': [{'type': 'bar', 'data': [1, last_units]}]}}
         if tamper == 'nan':
@@ -367,14 +382,7 @@ def test_verify_gate_branches():
     from analysis import verify
 
     def build(tmp):
-        os.makedirs(os.path.join(tmp, 'charts'), exist_ok=True)
-        for stem in verify.CHART_STEMS:
-            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
-                f.write(b'x')
-            data = [50] if stem == 'structure_share' else [12345]
-            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
-                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': data}]}}, f)
+        _write_chart_stubs(tmp)
         with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
             f.write('12,345')
         with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
@@ -426,7 +434,7 @@ def test_preps_smoke():
     aua = metrics.avg_unit_area(monthly)
     district, area = load.load_district(), load.load_area()
     specs = [charts.prep_city_trend(monthly_ma), charts.prep_seasonality(monthly),
-             charts.prep_avg_area_trend(aua), charts.prep_weekly_trend(weekly),
+             charts.prep_avg_unit_area(aua), charts.prep_weekly_trend(weekly),
              charts.prep_weekly_avg_area(weekly), charts.prep_district_stacked(district),
              charts.prep_district_share(district), charts.prep_district_smallmul(district),
              charts.prep_area_segment_count(area), charts.prep_area_segment_share(area)]
@@ -504,14 +512,7 @@ def test_verify_kpi_branch():
         with open(os.path.join(data, 'resale_daily.csv'), 'w', encoding='utf-8-sig') as f:
             f.write('日期,签约套数,签约面积,住宅签约套数,住宅签约面积\n'
                     '2026-10-01,1,1,100,1\n2026-10-02,1,1,50,1\n')
-        os.makedirs(os.path.join(tmp, 'charts'))
-        for stem in verify.CHART_STEMS:
-            with open(os.path.join(tmp, stem + '.png'), 'wb') as f:
-                f.write(b'x')
-            vals = [50] if stem == 'structure_share' else [12345]
-            with open(os.path.join(tmp, 'charts', stem + '.json'), 'w', encoding='utf-8') as f:
-                _json.dump({'name': stem, 'kind': 'lines', 'height': 100,
-                            'option': {'series': [{'type': 'bar', 'data': vals}]}}, f)
+        _write_chart_stubs(tmp)
         with open(os.path.join(tmp, 'trend_report.md'), 'w', encoding='utf-8') as f:
             f.write('12,345')
         with open(os.path.join(tmp, 'trend_report.html'), 'w', encoding='utf-8') as f:
@@ -635,19 +636,20 @@ def test_ttm_ytd_share():
 def test_ui_fixes():
     """用户验收修复（2026-10-27）：热力图默认标签/套均 y_min=80/累计视角裁前导空。"""
     from analysis import load, metrics, charts
+    monthly = load.load_monthly()
     # 热力图 label 无 '{c}' formatter（三元组问题，三张热力统一）
-    for spec in (charts.prep_seasonality(load.load_monthly()),
+    for spec in (charts.prep_seasonality(monthly),
                  charts.prep_area_segment_count(load.load_area())):
         assert 'formatter' not in charts.to_echarts(spec)['series'][0]['label']
     # 套均面积：y_min 80 + 数值 2 位小数
-    s = charts.prep_avg_area_trend(metrics.avg_unit_area(load.load_monthly()))
+    s = charts.prep_avg_unit_area(metrics.avg_unit_area(monthly))
     assert s['y_min'] == 80 and s['tick_decimals'] == 2
     assert all(round(v, 2) == v for v in s['series'][0]['values'])
     opt = charts.to_echarts(s)
     assert opt['yAxis'][0]['min'] == 80
     # 累计视角：首点即有数据（前导全空已裁）
     m_cum = metrics.add_ytd(metrics.add_ttm(
-        metrics.sanitize_bad_values(metrics.add_yoy_mom(load.load_monthly()))))
+        metrics.sanitize_bad_values(metrics.add_yoy_mom(monthly))))
     c = charts.prep_cum_view(m_cum)
     assert c['series'][0]['values'][0] is not None
 

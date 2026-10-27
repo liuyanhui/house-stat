@@ -123,6 +123,17 @@ def segment_share(series_df, period_col, seg_col, val_col):
     return df
 
 
+def _week_bucket(df, aggs):
+    """按自然周（周一起）分桶的共用实现。aggs: {输出列: (源列, 聚合)}。
+
+    周口径（周一起、跨月归月首所在周）只此一处定义，周度类聚合共用。
+    """
+    df = df.copy()
+    df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
+    return (df.groupby('week_start').agg(**aggs)
+            .reset_index().sort_values('week_start'))
+
+
 def weekly_aggregate(daily, estimated_dates=None):
     """按自然周（周一起）聚合日数据：套数、面积、套均面积、天数 + 4周移动均值。
 
@@ -137,19 +148,16 @@ def weekly_aggregate(daily, estimated_dates=None):
         estimated_dates = expand_estimated_days()
     est = {str(d)[:10] for d in estimated_dates}
     df = daily.copy()
-    df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
     df['_is_est'] = df['日期'].dt.strftime('%Y-%m-%d').isin(est)
-    g = df.groupby('week_start').agg(
-        套数=('住宅签约套数', 'sum'),
-        面积=('住宅签约面积', 'sum'),
-        days=('日期', 'nunique'),
-        est_days=('_is_est', 'sum'),
-    ).reset_index().sort_values('week_start')
+    g = _week_bucket(df, {'套数': ('住宅签约套数', 'sum'),
+                          '面积': ('住宅签约面积', 'sum'),
+                          'days': ('日期', 'nunique'),
+                          'est_days': ('_is_est', 'sum')}).reset_index(drop=True)
     g['est_days'] = g['est_days'].astype(int)
     g['套均面积'] = np.where(g['套数'] > 0, g['面积'] / g['套数'], np.nan)
     g['MA4'] = g['套数'].rolling(4, min_periods=1).mean()
     g['MA4含估算'] = g['est_days'].rolling(4, min_periods=1).sum() > 0
-    return g.reset_index(drop=True)
+    return g
 
 
 def add_ttm(monthly, col='住宅签约套数', name='TTM套数'):
@@ -211,15 +219,13 @@ def new_home_weekly(new_daily):
     if new_daily is None or new_daily.empty:
         return new_daily
     df = new_daily.copy()
-    df['week_start'] = df['日期'] - pd.to_timedelta(df['日期'].dt.weekday, unit='d')
     df['认购住宅'] = df['期房认购住宅套数'].fillna(0) + df['现房认购住宅套数'].fillna(0)
     df['签约住宅'] = df['期房签约住宅套数'].fillna(0) + df['现房签约住宅套数'].fillna(0)
-    g = (df.groupby('week_start')
-         .agg(认购住宅=('认购住宅', 'sum'), 签约住宅=('签约住宅', 'sum'),
-              days=('日期', 'nunique'))
-         .reset_index().sort_values('week_start'))
+    g = _week_bucket(df, {'认购住宅': ('认购住宅', 'sum'),
+                          '签约住宅': ('签约住宅', 'sum'),
+                          'days': ('日期', 'nunique')}).reset_index(drop=True)
     g['MA4'] = g['签约住宅'].rolling(4, min_periods=1).mean()
-    return g.reset_index(drop=True)
+    return g
 
 
 def new_inventory(new_daily):
@@ -245,8 +251,7 @@ def district_mom(district):
     wide = d.pivot_table(index='period', columns='区县_clean',
                          values='签约套数', aggfunc='sum')
     wide = wide[wide.sum().sort_values(ascending=False).index]
-    mom = wide.pct_change() * 100
-    mom.iloc[0] = np.nan
+    mom = wide.pct_change() * 100   # 首行天然 NaN（无上月可比）
     for i in range(1, len(wide)):
         if (wide.index[i] - wide.index[i - 1]).n != 1:
             mom.iloc[i] = np.nan
