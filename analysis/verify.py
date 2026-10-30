@@ -18,10 +18,34 @@ analyze.py 在 render 之后、开浏览器之前调用；失败由调用方把 
 import csv
 import json
 import os
+import re
+import sys
+from datetime import datetime, timedelta
+
+import chinese_calendar as cc
+
+import quality
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VENDOR_PATH = os.path.join(_ROOT, 'assets', 'vendor', 'echarts.min.js')
 HTML_SIZE_LIMIT = 2 * 1024 * 1024
+
+# 周度叙述禁用词封闭表（需求 v0.5 §2.2；单一来源，tests 从此导入，扫描仅限叙述段）
+WK_BANNED_WORDS = ['预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱']
+
+# wk_facts.json 全字段（直比用；与 metrics.weekly_trend_facts 默认 dict 逐字对齐）
+_WK_FIELDS = ['narrative', 'n_full_weeks', 'last_week_state', 'last_full_week',
+              'last_full_units', 'direction', 'null_reason', 'streak_weeks',
+              'streak_change_pct', 'last_pair_reversal', 'streak_contains_est',
+              'post_holiday', 'chain_first_week', 'chain_first_units',
+              'anchor_kind', 'anchor_week', 'avg4', 'avg26', 'avg26_weeks',
+              'level', 'level_gap_pct', 'peak13_week', 'peak13_units',
+              'peak13_est', 'peak13_est_days', 'peak13_holiday', 'trough13_week',
+              'trough13_units', 'trough13_est', 'trough13_est_days',
+              'trough13_holiday', 'ip_week', 'ip_units', 'ip_days',
+              'ip_contiguous', 'ip_daily_avg', 'ip_prev_same_avg', 'ip_prev_same_ok']
+
+_WK_CC_WARNED = {'flag': False}
 
 CHART_STEMS = ['city_trend', 'seasonality', 'avg_unit_area', 'weekly_trend',
                'weekly_avg_area', 'district_stacked', 'district_share',
@@ -41,6 +65,213 @@ def read_last_monthly(data_dir):
         rows = list(csv.DictReader(f))
     last = rows[-1]
     return str(last['月份']), int(last['住宅签约套数'])
+
+
+# ---------------------------------------------------------------------------
+# 周度叙述事实独立重算（W4，设计 v1.4 §2.4）——csv 直读、自建周分桶，不经
+# load/metrics；与 metrics.weekly_trend_facts 构成双实现，交叉验证防漂移
+# （两边规则必须逐字对齐，改任一侧先同步设计文档 §2.1）。
+
+def _wk_expand_est(mapping):
+    """quality.ESTIMATED_DAYS 键展开为具体日期（'2026-07-25/26' 简写兼容）。"""
+    days = []
+    for k in mapping:
+        parts = [p.strip() for p in str(k).split('/')]
+        days.append(parts[0])
+        for p in parts[1:]:
+            days.append(p if len(p) > 2 else parts[0][:8] + p)
+    return sorted(set(days))
+
+
+def _wk_net_workdays(week_start):
+    """周内工作日净额（chinese_calendar 含调休；未覆盖回退纯 weekday + 一次性告警）。"""
+    n = 0
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        try:
+            if cc.is_workday(d):
+                n += 1
+        except NotImplementedError:
+            if not _WK_CC_WARNED['flag']:
+                _WK_CC_WARNED['flag'] = True
+                print(f'警告: chinese_calendar 未覆盖日期 {d}，节假日周判定回退纯 weekday',
+                      file=sys.stderr)
+            if d.weekday() < 5:
+                n += 1
+    return n
+
+
+def _wk_facts_from_csv(data_dir, estimated_dates=None):
+    """从 resale_daily.csv 独立重算周度叙述事实（与 metrics 同 schema；float 字段
+    不 round——QA 裁决：重算保持原值对 json round1 值比，容差 0.1）。"""
+    if estimated_dates is None:
+        estimated_dates = _wk_expand_est(quality.ESTIMATED_DAYS)
+    est = {str(d)[:10] for d in estimated_dates}
+    units = {}
+    with open(os.path.join(data_dir, 'resale_daily.csv'), encoding='utf-8-sig') as f:
+        for r in csv.DictReader(f):
+            try:
+                v = int(float(r.get('住宅签约套数') or 0))
+            except (TypeError, ValueError):
+                continue
+            ds = str(r.get('日期') or '')[:10]
+            if v > 0 and ds:
+                units[datetime.strptime(ds, '%Y-%m-%d').date()] = v
+    f = {k: None for k in _WK_FIELDS}
+    f.update({'narrative': False, 'n_full_weeks': 0, 'streak_weeks': 0,
+              'last_pair_reversal': False, 'streak_contains_est': False,
+              'post_holiday': False, 'avg26_weeks': 0, 'anchor_kind': 'none'})
+    if not units:
+        return f
+    weeks = {}
+    for d, u in units.items():
+        ws = d - timedelta(days=d.weekday())
+        w = weeks.setdefault(ws, {'u': 0, 'days': set(), 'est': 0})
+        w['u'] += u
+        w['days'].add(d)
+        if d.isoformat() in est:
+            w['est'] += 1
+    ws_sorted = sorted(weeks)
+    fw = [(ws, weeks[ws]['u'], weeks[ws]['est']) for ws in ws_sorted
+          if len(weeks[ws]['days']) >= 7]
+
+    hol_cache = {}
+
+    def hol(ws):
+        if ws not in hol_cache:
+            hol_cache[ws] = _wk_net_workdays(ws) <= 3
+        return hol_cache[ws]
+
+    f['n_full_weeks'] = len(fw)
+    if fw:
+        last_ws, last_u, _ = fw[-1]
+        f['last_full_week'] = last_ws.isoformat()
+        f['last_full_units'] = last_u
+        chain = [len(fw) - 1]
+        chain_dir = None
+        first_break = None
+        i = len(fw) - 1
+        while i >= 1:
+            a, b = fw[i - 1], fw[i]
+            if (b[0] - a[0]).days > 7:
+                first_break = 'gap'
+                break
+            if hol(a[0]) or hol(b[0]):
+                first_break = 'holiday'
+                break
+            if a[1] == b[1]:
+                first_break = 'tie'
+                break
+            d = 1 if b[1] > a[1] else -1
+            if chain_dir is None:
+                chain_dir = d
+            elif d != chain_dir:
+                break
+            chain.insert(0, i - 1)
+            i -= 1
+        if chain_dir is not None:
+            f['direction'] = 'up' if chain_dir == 1 else 'down'
+            f['streak_weeks'] = len(chain) - 1
+            cfw, cfu = fw[chain[0]][0], fw[chain[0]][1]
+            f['streak_change_pct'] = (last_u - cfu) / cfu * 100
+            if len(chain) >= 2:
+                f['chain_first_week'] = cfw.isoformat()
+                f['chain_first_units'] = cfu
+        else:
+            f['null_reason'] = {'gap': 'gap',
+                                'holiday': 'holiday_last' if hol(last_ws) else 'holiday_prev',
+                                'tie': 'tie'}.get(first_break)
+        if len(chain) == 2 and chain[0] >= 1:
+            a, b = fw[chain[0] - 1], fw[chain[0]]
+            ok = ((b[0] - a[0]).days <= 7 and not hol(a[0]) and not hol(b[0])
+                  and a[1] != b[1])
+            if ok:
+                d = 1 if b[1] > a[1] else -1
+                f['last_pair_reversal'] = bool(d != chain_dir)
+        f['streak_contains_est'] = any(fw[j][2] > 0 for j in chain)
+        j0 = chain[0]
+        f['post_holiday'] = bool(j0 >= 1 and hol(fw[j0 - 1][0]))
+
+        if len(fw) >= 13:
+            w13 = fw[-13:]
+            for key, want_max in (('peak13', True), ('trough13', False)):
+                best = None
+                for t in w13:
+                    if best is None:
+                        best = t
+                    elif t[1] == best[1]:
+                        if not hol(t[0]) and hol(best[0]):
+                            best = t
+                    elif (t[1] > best[1]) == want_max:
+                        best = t
+                f[f'{key}_week'] = best[0].isoformat()
+                f[f'{key}_units'] = best[1]
+                f[f'{key}_est'] = best[2] > 0
+                f[f'{key}_est_days'] = best[2]
+                f[f'{key}_holiday'] = hol(best[0])
+
+        if len(fw) >= 4:
+            raw4 = sum(t[1] for t in fw[-4:]) / 4
+            base = fw[:-4][-26:]
+            f['avg4'] = raw4
+            f['avg26_weeks'] = len(base)
+            if base:
+                raw26 = sum(t[1] for t in base) / len(base)
+                f['avg26'] = raw26
+                if len(base) >= 13:
+                    gap = (raw4 - raw26) / raw26 * 100
+                    f['level_gap_pct'] = gap
+                    f['level'] = ('parity' if abs(gap) <= 5
+                                  else 'above' if gap > 0 else 'below')
+            if len(fw) >= 13:
+                w13 = fw[-13:]
+                chain_set = {fw[j][0] for j in chain}
+                last4_start = fw[-4][0]
+                cand = [t for t in w13 if t[0] not in chain_set
+                        and not hol(t[0]) and t[0] < last4_start]
+                hit = None
+                if cand:
+                    close = min(cand, key=lambda t: abs(t[1] - raw4))
+                    if abs(close[1] - raw4) <= 0.10 * raw4:
+                        hit = close
+                if hit is not None:
+                    f['anchor_kind'] = 'week'
+                    f['anchor_week'] = hit[0].isoformat()
+                elif all(raw4 > t[1] for t in w13):
+                    f['anchor_kind'] = 'high'
+                elif all(raw4 < t[1] for t in w13):
+                    f['anchor_kind'] = 'low'
+
+    lw = ws_sorted[-1]
+    if len(weeks[lw]['days']) == 7:
+        f['last_week_state'] = 'complete'
+    else:
+        prev = ws_sorted[-2] if len(ws_sorted) >= 2 else None
+        if prev is not None and len(weeks[prev]['days']) < 7 and not hol(prev):
+            f['last_week_state'] = 'lagged'
+        else:
+            f['last_week_state'] = 'in_progress'
+        dates = sorted(weeks[lw]['days'])
+        f['ip_week'] = lw.isoformat()
+        f['ip_days'] = len(dates)
+        f['ip_units'] = weeks[lw]['u']
+        offs = [(d - lw).days for d in dates]
+        f['ip_contiguous'] = bool(max(offs) - min(offs) + 1 == len(offs))
+        f['ip_daily_avg'] = round(weeks[lw]['u'] / len(dates))
+        prev_dates = [d - timedelta(days=7) for d in dates]
+        if all(d in units for d in prev_dates):
+            psum = sum(units[d] for d in prev_dates)
+            f['ip_prev_same_avg'] = round(psum / len(prev_dates))
+            f['ip_prev_same_ok'] = True
+        else:
+            f['ip_prev_same_ok'] = False
+
+    f['narrative'] = len(fw) >= 8
+    if not f['narrative']:
+        for k in f:
+            if k not in ('narrative', 'n_full_weeks', 'last_week_state'):
+                f[k] = None
+    return f
 
 
 def check(report_dir, data_dir, no_js=False):
@@ -206,5 +437,60 @@ def check(report_dir, data_dir, no_js=False):
                               f'!= 独立重算 {csv_sum:.0f}')
         except (KeyError, IndexError, TypeError):
             issues.append('new_weekly option 结构异常')
+
+    # 10) 周度叙述事实门（W4，设计 v1.4 §2.4）：存在性 fail-closed / 降级三方
+    #     一致性 / 独立重算直比（float 容差 0.1）/ 段内条件化锚点 / 措辞门
+    daily_csv = os.path.join(data_dir, 'resale_daily.csv')
+    daily_nonempty = False
+    if os.path.isfile(daily_csv):
+        with open(daily_csv, encoding='utf-8-sig') as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    if int(float(r.get('住宅签约套数') or 0)) > 0:
+                        daily_nonempty = True
+                        break
+                except (TypeError, ValueError):
+                    continue
+    wk_path = os.path.join(report_dir, 'wk_facts.json')
+    has_wk = os.path.isfile(wk_path)
+    if daily_nonempty and not has_wk:
+        issues.append('wk_facts.json 缺失（daily 非空必写，fail-closed）')
+    if not daily_nonempty and has_wk:
+        issues.append('wk_facts.json 残留（daily 为空应删除）')
+    if has_wk and daily_nonempty:
+        try:
+            wk = json.loads(open(wk_path, encoding='utf-8').read())
+            re_f = _wk_facts_from_csv(data_dir)
+        except Exception as e:
+            wk, re_f = None, None
+            issues.append(f'周度事实重算/读取失败: {e}')
+        if wk is not None:
+            for k in _WK_FIELDS:
+                a, b = wk.get(k), re_f.get(k)
+                if isinstance(b, float):
+                    if a is None or abs(float(a) - b) > 0.1:
+                        issues.append(f'wk_facts.{k} 不符: json={a} != 重算={round(b, 3)}')
+                elif a != b:
+                    issues.append(f'wk_facts.{k} 不符: json={a} != 重算={b}')
+            if os.path.isfile(md_path):
+                n_delim = md.count('<!-- wk-narrative -->')
+                if wk.get('narrative') and n_delim != 2:
+                    issues.append(f'叙述界定符 {n_delim} 个（narrative=true 应恰 2）')
+                if not wk.get('narrative') and n_delim != 0:
+                    issues.append(f'叙述界定符 {n_delim} 个（narrative=false 应为 0）')
+                if n_delim == 2:
+                    seg = md.split('<!-- wk-narrative -->')[1]
+                    for bad in WK_BANNED_WORDS:
+                        if bad in seg:
+                            issues.append(f'叙述段含禁用词: {bad}')
+                    nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+|\d+(?:\.\d+)?%', seg)
+                    if len(nums) > 8:
+                        issues.append(f'叙述段数字预算超限: {len(nums)} > 8')
+                    if wk.get('direction') in ('up', 'down'):
+                        if f"{wk.get('last_full_units'):,}" not in seg:
+                            issues.append('叙述段缺末完整周套数千分位锚点')
+                    for pk in ('peak13_units', 'trough13_units'):
+                        if wk.get(pk) is not None and f'{wk[pk]:,}' not in seg:
+                            issues.append(f'叙述段缺 {pk} 千分位锚点')
 
     return (not issues), issues

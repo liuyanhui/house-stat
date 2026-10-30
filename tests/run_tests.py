@@ -491,6 +491,116 @@ def test_weekly_narrative_render():
     assert '大体持平' in out
 
 
+def test_verify_weekly_gate():
+    """W4：周度事实门——双实现交叉验证逐字段相等（防 metrics/verify 漂移）；
+    篡改数值 / narrative=false×界定符并存 / 缺 json / daily 空残留 /
+    禁用词 / 预算超限 各注错一次均触发 issue。"""
+    import json as _json
+    import pandas as pd
+    from analysis import metrics, verify, weekly_narrative
+
+    # 合成场景：15 完整周（含 2025 国庆两周假期塌量）+ 周漂移上升趋势 +
+    # 估算注入（09-15 周）+ 末周进行中（周一二三）
+    rows = []
+    t0 = pd.Timestamp('2025-08-04')
+    for k in range(15 * 7 + 3):
+        d = t0 + pd.Timedelta(days=k)
+        u = 100 + (k % 7) * 10 + (k // 7) * 5
+        if pd.Timestamp('2025-09-29') <= d <= pd.Timestamp('2025-10-12'):
+            u = 40 + (k // 7)          # 国庆两周塌量
+        rows.append((d.strftime('%Y-%m-%d'), u))
+    est = ['2025-09-15', '2025-09-16']
+    d_df = _daily_with_holes(rows)
+
+    # ① 交叉验证：metrics 链 vs csv 独立重算，逐字段相等（float 容差 0.1）
+    f1 = metrics.weekly_trend_facts(
+        metrics.weekly_aggregate(d_df, estimated_dates=est), daily=d_df)
+    assert f1['narrative'] is True and f1['direction'] == 'up'
+    with tempfile.TemporaryDirectory() as tmp:
+        d_df.to_csv(os.path.join(tmp, 'resale_daily.csv'), index=False,
+                    encoding='utf-8-sig')
+        f2 = verify._wk_facts_from_csv(tmp, estimated_dates=est)
+        assert set(f1) == set(f2) == set(verify._WK_FIELDS)
+        for k in f2:
+            a, b = f1[k], f2[k]
+            if isinstance(b, float):
+                assert a is not None and abs(a - b) <= 0.1, (k, a, b)
+            else:
+                assert a == b, (k, a, b)
+
+    # ② 门：全套产物齐 → 过；逐类注错 → 各自触发
+    def build(rep, data, facts, md_text):
+        _write_chart_stubs(rep)
+        with open(os.path.join(rep, 'charts', 'city_trend.json'), 'w', encoding='utf-8') as f:
+            _json.dump({'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
+                        'option': {'series': [{'type': 'bar', 'data': [1, 12345]}]}}, f)
+        with open(os.path.join(rep, 'trend_report.md'), 'w', encoding='utf-8') as f:
+            f.write(md_text)
+        with open(os.path.join(rep, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('<script id="chart-data"></script>')
+        if facts is not None:
+            with open(os.path.join(rep, 'wk_facts.json'), 'w', encoding='utf-8') as f:
+                _json.dump(facts, f, ensure_ascii=False, allow_nan=False)
+        with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
+                    '2026-09,2,2,12345,2\n')
+        d_df.to_csv(os.path.join(data, 'resale_daily.csv'), index=False,
+                    encoding='utf-8-sig')
+
+    seg = weekly_narrative.render(f1)
+    base_md = seg + '\n\n最新月 12,345 套\n'
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        build(rep, data, f1, base_md)
+        ok, issues = verify.check(rep, data)
+        assert ok, issues
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        bad = dict(f1, last_full_units=f1['last_full_units'] + 7)
+        build(rep, data, bad, base_md)
+        ok, issues = verify.check(rep, data)
+        assert any('wk_facts.last_full_units' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        build(rep, data, f1, base_md.replace('不是市场转冷', '不是市场回暖转冷'))
+        ok, issues = verify.check(rep, data)
+        assert any('禁用词' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        build(rep, data, f1, base_md.replace('。**', '。**1,111 2,222 3,333 4,444 5,555 6,666 7,777 8,888', 1))
+        ok, issues = verify.check(rep, data)
+        assert any('数字预算超限' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        build(rep, data, None, base_md)          # 缺 json
+        ok, issues = verify.check(rep, data)
+        assert any('wk_facts.json 缺失' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        # daily 空（仅 monthly）而 json 残留
+        _write_chart_stubs(rep)
+        with open(os.path.join(rep, 'charts', 'city_trend.json'), 'w', encoding='utf-8') as f:
+            _json.dump({'name': 'city_trend', 'kind': 'bars_lines', 'height': 100,
+                        'option': {'series': [{'type': 'bar', 'data': [1, 12345]}]}}, f)
+        with open(os.path.join(rep, 'trend_report.md'), 'w', encoding='utf-8') as f:
+            f.write('最新月 12,345 套')
+        with open(os.path.join(rep, 'trend_report.html'), 'w', encoding='utf-8') as f:
+            f.write('<script id="chart-data"></script>')
+        with open(os.path.join(rep, 'wk_facts.json'), 'w', encoding='utf-8') as f:
+            _json.dump(f1, f, ensure_ascii=False, allow_nan=False)
+        with open(os.path.join(data, 'resale_monthly.csv'), 'w', encoding='utf-8-sig') as f:
+            f.write('月份,网上签约套数,网上签约面积(m2),住宅签约套数,住宅签约面积(m2)\n'
+                    '2026-09,2,2,12345,2\n')
+        ok, issues = verify.check(rep, data)
+        assert any('残留' in i for i in issues)
+
+    # ③ narrative=false × 界定符并存（7 完整周小数据集 + 手放界定符）
+    small_rows = [( (pd.Timestamp('2025-06-02') + pd.Timedelta(days=k)).strftime('%Y-%m-%d'),
+                    100 + k) for k in range(7 * 7)]
+    s_df = _daily_with_holes(small_rows)
+    f3 = metrics.weekly_trend_facts(
+        metrics.weekly_aggregate(s_df, estimated_dates=[]), daily=s_df)
+    assert f3['narrative'] is False
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        build(rep, data, f3, '<!-- wk-narrative -->\n不该出现\n<!-- wk-narrative -->\n\n最新月 12,345 套\n')
+        ok, issues = verify.check(rep, data)
+        assert any('narrative=false 应为 0' in i for i in issues)
+
+
 def test_sanitize_bad_values():
     """T1.3：2025-01 网上签约面积坏值 → NaN，其余月份不动（真实数据）。"""
     from analysis import load, metrics
@@ -859,6 +969,11 @@ def test_verify_kpi_branch():
         kpi = {'latest': {'units': 12345}, 'mtd': {'period': '2026-10', 'units': 150, 'days': 2}}
         with open(os.path.join(tmp, 'kpi.json'), 'w', encoding='utf-8') as f:
             _json.dump(kpi, f)
+        # W4：daily 非空（2 天）→ wk_facts.json 必在（n_full=0 最小化形态）
+        wk = {k: None for k in verify._WK_FIELDS}
+        wk.update({'narrative': False, 'n_full_weeks': 0, 'last_week_state': 'in_progress'})
+        with open(os.path.join(tmp, 'wk_facts.json'), 'w', encoding='utf-8') as f:
+            _json.dump(wk, f)
         ok, issues = verify.check(tmp, data)
         assert ok, issues
         kpi['latest']['units'] = 999
