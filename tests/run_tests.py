@@ -152,6 +152,104 @@ def test_weekly_est_propagation():
         assert bool(w['MA4含估算'].iloc[0])
 
 
+def _mk_weekly(starts, units, est=None):
+    """W1 测试共用：最小周表（weekly_trend_facts 只消费这 4 列）。"""
+    import pandas as pd
+    n = len(starts)
+    return pd.DataFrame({
+        'week_start': pd.to_datetime(starts),
+        '套数': units,
+        'days': [7] * n,
+        'est_days': est if est is not None else [0] * n,
+    })
+
+
+def _mondays(start_iso, n):
+    """从 start_iso（须为周一）起连续 n 个周一的日期串列表。"""
+    import pandas as pd
+    t0 = pd.Timestamp(start_iso)
+    return [(t0 + pd.Timedelta(weeks=k)).strftime('%Y-%m-%d') for k in range(n)]
+
+
+def test_weekly_facts_direction():
+    """W1a：方向链——N=链长−1（差一修正）、节假日/持平/缺口中断、估算不中断、
+    null 成因（tie/holiday_last/holiday_prev/gap）、last_pair_reversal、post_holiday、
+    峰谷 tie-break。节假日用真实日期（2025 国庆：9-28 周调休上班、9-29/10-06 周假期）。"""
+    from analysis import metrics
+    import pandas as pd
+
+    # 节假日周原语：2025-09-29 周（含 10-01~03）与 10-06 周为假期周；
+    # 9-22 周（含 9-28 调休上班）净额 6 → 非假期周（调休覆盖验证）
+    assert metrics._is_holiday_week(pd.Timestamp('2025-09-29'))
+    assert metrics._is_holiday_week(pd.Timestamp('2025-10-06'))
+    assert not metrics._is_holiday_week(pd.Timestamp('2025-09-22'))
+
+    # ① 连涨：N = 链长−1（8 周连涨 → N=7，非 8）
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700]))
+    assert f['direction'] == 'up' and f['streak_weeks'] == 7
+    assert f['null_reason'] is None and not f['post_holiday']
+    assert f['peak13_units'] is None            # 不足 13 周峰谷全 None
+
+    # ② N=1 + 互现：末对涨、再前一对跌 → last_pair_reversal
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 6),
+                                              [3000, 3200, 3400, 3200, 100, 110]))
+    assert f['direction'] == 'up' and f['streak_weeks'] == 1
+    assert f['last_pair_reversal'] is True
+
+    # ③ 连跌
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 5),
+                                              [4000, 3900, 3800, 3700, 3600]))
+    assert f['direction'] == 'down' and f['streak_weeks'] == 4
+
+    # ④ 持平中断 → null/tie
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 4),
+                                              [3000, 3200, 3300, 3300]))
+    assert f['direction'] is None and f['null_reason'] == 'tie' and f['streak_weeks'] == 0
+
+    # ⑤ 节假日周中断 + post_holiday：国庆两周假期后 10-13/10-20 两周涨 → N=1、节后
+    starts = _mondays('2025-09-01', 8)          # 09-01..10-27
+    units = [3300, 3400, 3500, 3600, 2000, 2100, 3200, 3400]
+    f = metrics.weekly_trend_facts(_mk_weekly(starts, units))
+    assert f['direction'] == 'up' and f['streak_weeks'] == 1
+    assert f['post_holiday'] is True
+    assert f['last_pair_reversal'] is False     # 10-06 假期周 → 再前一对不可比
+
+    # ⑥ 末完整周本身是假期周 → holiday_last
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-09-08', 5),
+                                              [3400, 3500, 3600, 2000, 2100]))
+    assert f['direction'] is None and f['null_reason'] == 'holiday_last'
+
+    # ⑦ 末完整周前一周是假期周 → holiday_prev（节后首周）
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-09-08', 6),
+                                              [3400, 3500, 3600, 2000, 2100, 3200]))
+    assert f['direction'] is None and f['null_reason'] == 'holiday_prev'
+
+    # ⑧ 周序缺口 >7 天中断 → gap（实施补充的第 4 成因；缺口须紧邻末周）
+    f = metrics.weekly_trend_facts(_mk_weekly(
+        ['2025-06-02', '2025-06-09', '2025-06-16', '2025-06-30'],
+        [3000, 3100, 3200, 3300]))
+    assert f['direction'] is None and f['null_reason'] == 'gap'
+
+    # ⑨ 估算周不中断，标记随链传播
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 5),
+                                              [3000, 3100, 3200, 3300, 3400],
+                                              est=[0, 0, 1, 0, 0]))
+    assert f['direction'] == 'up' and f['streak_weeks'] == 4
+    assert f['streak_contains_est'] is True
+
+    # ⑩ 峰谷 tie-break：假期周 09-29 与正常周 10-13 同为最大 → 取非节假日周；
+    #    谷值落在假期周 10-06（保留候选）→ trough13_holiday=True
+    starts = _mondays('2025-08-04', 13)         # 08-04..10-27，含 13 个完整周
+    units = [3000, 3050, 3100, 3150, 3200, 3250, 3300, 3350, 4000, 2100, 4000, 3900, 3800]
+    est = [0] * 13
+    est[10] = 1                                 # 10-13 周含估算 1 天
+    f = metrics.weekly_trend_facts(_mk_weekly(starts, units, est=est))
+    assert f['peak13_week'] == '2025-10-13' and f['peak13_units'] == 4000
+    assert f['peak13_est'] is True and f['peak13_holiday'] is False
+    assert f['trough13_week'] == '2025-10-06' and f['trough13_holiday'] is True
+
+
 def test_sanitize_bad_values():
     """T1.3：2025-01 网上签约面积坏值 → NaN，其余月份不动（真实数据）。"""
     from analysis import load, metrics

@@ -4,6 +4,9 @@
 同比/环比、N 月移动均值、套均面积、区域份额/排名、面积段·价格段占比。
 全部基于官方自爬数据，确定性、可复现。
 """
+import sys
+
+import chinese_calendar as cc
 import pandas as pd
 import numpy as np
 
@@ -159,6 +162,138 @@ def weekly_aggregate(daily, estimated_dates=None):
     g['MA4'] = g['套数'].rolling(4, min_periods=1).mean()
     g['MA4含估算'] = g['est_days'].rolling(4, min_periods=1).sum() > 0
     return g
+
+
+# ---------------------------------------------------------------------------
+# 周度叙述事实（需求 v0.3 / 设计 v1.2 §2.1）：只出数字与枚举，文案在
+# analysis/weekly_narrative.py。verify 侧另有一套 CSV 独立重算（防同源盲区），
+# 两边规则必须逐字对齐——改任一侧先同步设计文档。
+
+_CC_WARNED = {'flag': False}
+
+
+def _net_workdays(week_start):
+    """周内（周一起 7 天）工作日净额。chinese_calendar 含调休；未覆盖日期回退
+    纯 weekday 并一次性 stderr 告警（回退模式同 script/analyze.py:classify_day_type）。"""
+    n = 0
+    for i in range(7):
+        d = week_start + pd.Timedelta(days=i)
+        try:
+            if cc.is_workday(d):
+                n += 1
+        except NotImplementedError:
+            if not _CC_WARNED['flag']:
+                _CC_WARNED['flag'] = True
+                print(f'警告: chinese_calendar 未覆盖日期 {d.date()} 及之后，'
+                      '节假日周判定回退纯 weekday（无假期识别）', file=sys.stderr)
+            if d.weekday() < 5:
+                n += 1
+    return n
+
+
+def _is_holiday_week(week_start):
+    """节假日周：工作日净额 ≤3（需求 §2.3——净额口径覆盖调休补班与 1 天桥假）。"""
+    return _net_workdays(week_start) <= 3
+
+
+def _pair_comparable(a, b, hol):
+    """相邻完整周是否可比 → (可比, 方向 1/-1 或中断原因)。
+
+    中断：周序缺口 >7 天 / 任一侧节假日周 / 持平（设计 §2.1 判定一）。
+    """
+    if (b['week_start'] - a['week_start']).days > 7:
+        return False, 'gap'
+    if hol[a['week_start']] or hol[b['week_start']]:
+        return False, 'holiday'
+    if a['套数'] == b['套数']:
+        return False, 'tie'
+    return True, (1 if b['套数'] > a['套数'] else -1)
+
+
+def _pick_extreme(w13, hol, want_max):
+    """13 周窗内极值周；同值 tie-break 优先非节假日周（防把次周同值归因假期）。"""
+    best_ws, best_u = None, None
+    for _, r in w13.iterrows():
+        ws, u = r['week_start'], int(r['套数'])
+        if best_u is None:
+            best_ws, best_u = ws, u
+        elif u == best_u:
+            if not hol[ws] and hol[best_ws]:    # tie-break：候选非节假日、现任是 → 换
+                best_ws, best_u = ws, u
+        elif (u > best_u) == want_max:
+            best_ws, best_u = ws, u
+    return best_ws, best_u
+
+
+def weekly_trend_facts(weekly, daily=None):
+    """周度叙述事实（设计 v1.2 §2.1/§3 schema）——纯数据 dict，不含任何文案。
+
+    weekly：weekly_aggregate 输出（周口径与 est_days 单一来源）；
+    daily：末周三态与同期对齐用（W1b 起为必传）。
+    W1a 覆盖周侧：方向链（N=链长−1，差一修正）、null 成因（含 gap 实施补充）、
+    last_pair_reversal、post_holiday、峰谷（13 周窗、tie-break 非节假日优先）。
+    """
+    f = {'n_full_weeks': 0, 'last_full_week': None, 'last_full_units': None,
+         'direction': None, 'null_reason': None, 'streak_weeks': 0,
+         'last_pair_reversal': False, 'streak_contains_est': False,
+         'post_holiday': False, 'peak13_week': None, 'peak13_units': None,
+         'peak13_est': None, 'peak13_holiday': None,
+         'trough13_week': None, 'trough13_units': None,
+         'trough13_est': None, 'trough13_holiday': None}
+    if weekly is None or weekly.empty:
+        return f
+    fw = weekly[weekly['days'] >= 7].sort_values('week_start').reset_index(drop=True)
+    hol = {ws: _is_holiday_week(ws) for ws in fw['week_start']}
+    f['n_full_weeks'] = int(len(fw))
+    if fw.empty:
+        return f
+    last = fw.iloc[-1]
+    f['last_full_week'] = str(last['week_start'].date())
+    f['last_full_units'] = int(last['套数'])
+
+    # 方向链：从末位向前，遇不可比对（缺口/节假日/持平）或方向反转即中断
+    chain = [len(fw) - 1]
+    chain_dir = None
+    first_break = None
+    i = len(fw) - 1
+    while i >= 1:
+        ok, v = _pair_comparable(fw.iloc[i - 1], fw.iloc[i], hol)
+        if not ok:
+            first_break = v
+            break
+        if chain_dir is None:
+            chain_dir = v
+        elif v != chain_dir:
+            break
+        chain.insert(0, i - 1)
+        i -= 1
+    if chain_dir is not None:
+        f['direction'] = 'up' if chain_dir == 1 else 'down'
+        f['streak_weeks'] = len(chain) - 1  # N = 上涨/下跌次数（链 [100,110] → N=1）
+    else:
+        f['null_reason'] = {
+            'gap': 'gap',
+            'holiday': 'holiday_last' if hol[last['week_start']] else 'holiday_prev',
+            'tie': 'tie',
+        }.get(first_break)
+    if len(chain) == 2 and chain[0] >= 1:
+        ok, v = _pair_comparable(fw.iloc[chain[0] - 1], fw.iloc[chain[0]], hol)
+        f['last_pair_reversal'] = bool(ok and isinstance(v, int) and v != chain_dir)
+    f['streak_contains_est'] = bool(any(fw.iloc[j]['est_days'] > 0 for j in chain))
+    j0 = chain[0]
+    f['post_holiday'] = bool(j0 >= 1 and hol[fw.iloc[j0 - 1]['week_start']])
+
+    # 峰谷：13 周窗（不足 13 全 None）；谷值保留节假日周候选（事实低点+解释句价值）
+    if len(fw) >= 13:
+        w13 = fw.tail(13)
+        for key, want_max in (('peak13', True), ('trough13', False)):
+            ws, u = _pick_extreme(w13, hol, want_max)
+            row = w13[w13['week_start'] == ws].iloc[0]
+            f[f'{key}_week'] = str(ws.date())
+            f[f'{key}_units'] = u
+            f[f'{key}_est'] = bool(row['est_days'] > 0)
+            f[f'{key}_holiday'] = bool(hol[ws])
+    return f
 
 
 def add_ttm(monthly, col='住宅签约套数', name='TTM套数'):
