@@ -174,7 +174,8 @@ def _mondays(start_iso, n):
 def test_weekly_facts_direction():
     """W1a：方向链——N=链长−1（差一修正）、节假日/持平/缺口中断、估算不中断、
     null 成因（tie/holiday_last/holiday_prev/gap）、last_pair_reversal、post_holiday、
-    峰谷 tie-break。节假日用真实日期（2025 国庆：9-28 周调休上班、9-29/10-06 周假期）。"""
+    峰谷 tie-break。节假日用真实日期（2025 国庆：9-28 周调休上班、9-29/10-06 周假期）。
+    注：各用例均 ≥8 完整周（narrative 门 <8 会字段最小化）。"""
     from analysis import metrics
     import pandas as pd
 
@@ -192,19 +193,19 @@ def test_weekly_facts_direction():
     assert f['peak13_units'] is None            # 不足 13 周峰谷全 None
 
     # ② N=1 + 互现：末对涨、再前一对跌 → last_pair_reversal
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 6),
-                                              [3000, 3200, 3400, 3200, 100, 110]))
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [2500, 2600, 3000, 3200, 3400, 3200, 100, 110]))
     assert f['direction'] == 'up' and f['streak_weeks'] == 1
     assert f['last_pair_reversal'] is True
 
-    # ③ 连跌
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 5),
-                                              [4000, 3900, 3800, 3700, 3600]))
+    # ③ 连跌：链 5 周（4000 起）→ N=4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [3000, 3100, 3200, 4000, 3900, 3800, 3700, 3600]))
     assert f['direction'] == 'down' and f['streak_weeks'] == 4
 
     # ④ 持平中断 → null/tie
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 4),
-                                              [3000, 3200, 3300, 3300]))
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [2500, 2600, 2700, 2800, 3000, 3200, 3300, 3300]))
     assert f['direction'] is None and f['null_reason'] == 'tie' and f['streak_weeks'] == 0
 
     # ⑤ 节假日周中断 + post_holiday：国庆两周假期后 10-13/10-20 两周涨 → N=1、节后
@@ -216,26 +217,27 @@ def test_weekly_facts_direction():
     assert f['last_pair_reversal'] is False     # 10-06 假期周 → 再前一对不可比
 
     # ⑥ 末完整周本身是假期周 → holiday_last
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-09-08', 5),
-                                              [3400, 3500, 3600, 2000, 2100]))
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-08-04', 10),
+                                              [3000, 3050, 3100, 3150, 3200, 3250, 3300, 3350, 2000, 2100]))
     assert f['direction'] is None and f['null_reason'] == 'holiday_last'
 
     # ⑦ 末完整周前一周是假期周 → holiday_prev（节后首周）
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-09-08', 6),
-                                              [3400, 3500, 3600, 2000, 2100, 3200]))
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-08-11', 10),
+                                              [3000, 3050, 3100, 3150, 3200, 3250, 3300, 2000, 2100, 3200]))
     assert f['direction'] is None and f['null_reason'] == 'holiday_prev'
 
     # ⑧ 周序缺口 >7 天中断 → gap（实施补充的第 4 成因；缺口须紧邻末周）
     f = metrics.weekly_trend_facts(_mk_weekly(
-        ['2025-06-02', '2025-06-09', '2025-06-16', '2025-06-30'],
-        [3000, 3100, 3200, 3300]))
+        ['2025-05-26', '2025-06-02', '2025-06-09', '2025-06-16',
+         '2025-06-23', '2025-06-30', '2025-07-07', '2025-07-21'],
+        [3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700]))
     assert f['direction'] is None and f['null_reason'] == 'gap'
 
     # ⑨ 估算周不中断，标记随链传播
-    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 5),
-                                              [3000, 3100, 3200, 3300, 3400],
-                                              est=[0, 0, 1, 0, 0]))
-    assert f['direction'] == 'up' and f['streak_weeks'] == 4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500],
+                                              est=[0, 0, 0, 0, 0, 1, 0, 0]))
+    assert f['direction'] == 'up' and f['streak_weeks'] == 7
     assert f['streak_contains_est'] is True
 
     # ⑩ 峰谷 tie-break：假期周 09-29 与正常周 10-13 同为最大 → 取非节假日周；
@@ -248,6 +250,141 @@ def test_weekly_facts_direction():
     assert f['peak13_week'] == '2025-10-13' and f['peak13_units'] == 4000
     assert f['peak13_est'] is True and f['peak13_holiday'] is False
     assert f['trough13_week'] == '2025-10-06' and f['trough13_holiday'] is True
+
+
+def test_weekly_facts_level():
+    """W1b：水位——基准=剔近 4 周的最近 ≤26 完整周（防自比稀释）、±5% 死区、
+    基准 <13 → level=null、avg26_weeks 退化计数。"""
+    from analysis import metrics
+
+    # ① above + 窗口锚定：34 周 = 4×9000（窗外）+ 26×2000（基准窗）+ 4×4000（avg4）
+    units = [9000] * 4 + [2000] * 26 + [4000] * 4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-01-06', 34), units))
+    assert f['narrative'] is True
+    assert f['avg4'] == 4000.0 and f['avg26'] == 2000.0 and f['avg26_weeks'] == 26
+    assert f['level'] == 'above' and f['level_gap_pct'] == 100.0
+
+    # ② parity：死区内
+    units = [3000] * 30
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-01-06', 30), units))
+    assert f['level'] == 'parity' and f['level_gap_pct'] == 0.0
+
+    # ③ below：死区外
+    units = [3000] * 26 + [2000] * 4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-01-06', 30), units))
+    assert f['level'] == 'below' and f['level_gap_pct'] < -5
+
+    # ④ 基准 <13 → level=null（avg26 仍出值）
+    units = [3000] * 12 + [4000] * 4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-01-06', 16), units))
+    assert f['avg26_weeks'] == 12 and f['avg26'] == 3000.0
+    assert f['level'] is None and f['level_gap_pct'] is None
+
+    # ⑤ 基准 <26 的退化计数（渲染层"有数据以来"依据）
+    units = [3000] * 22 + [4000] * 4
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-01-06', 26), units))
+    assert f['avg26_weeks'] == 22 and f['level'] == 'above'
+
+
+def _mk_daily(start, per_day_units):
+    """W1b 测试共用：从 start 起按 per_day_units 逐日构造日表（面积=套数×90）。"""
+    import pandas as pd
+    dates = [pd.Timestamp(start) + pd.Timedelta(days=k) for k in range(len(per_day_units))]
+    return pd.DataFrame({'日期': dates, '住宅签约套数': per_day_units,
+                         '住宅签约面积': [u * 90 for u in per_day_units]})
+
+
+def _daily_with_holes(rows):
+    """[(date_iso, units), ...] 显式构造日表（含缺口/跳日；面积=套数×90）。"""
+    import pandas as pd
+    units = [r[1] for r in rows]
+    return pd.DataFrame({'日期': pd.to_datetime([r[0] for r in rows]),
+                         '住宅签约套数': units,
+                         '住宅签约面积': [u * 90 for u in units]})
+
+
+def test_weekly_facts_last_week():
+    """W1b：末周三态 + 同期对齐——complete / in_progress（位置对齐、contiguous）、
+    lagged（前一周缺天且非节假日）、假期周前周缺天不判 lagged、ip_* 源自 daily 子集。"""
+    from analysis import metrics
+    import pandas as pd
+
+    # ① complete：末周满 7 天 → ip_* 全 None
+    d = _mk_daily('2025-06-02', [100] * (7 * 8))
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['last_week_state'] == 'complete'
+    assert f['ip_units'] is None and f['ip_daily_avg'] is None
+
+    # ② in_progress：8 满周 @100/日 + 末周一二三 @200/日（≥8 完整周过 narrative 门）
+    d = _mk_daily('2025-06-02', [100] * (7 * 8) + [200, 200, 200])
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['last_week_state'] == 'in_progress'
+    assert f['ip_week'] == '2025-07-28' and f['ip_days'] == 3
+    assert f['ip_units'] == 600 and f['ip_daily_avg'] == 200
+    assert f['ip_contiguous'] is True
+    assert f['ip_prev_same_avg'] == 100 and f['ip_prev_same_ok'] is True  # 上周同位置 3×100
+
+    # ③ 周中缺天 → contiguous=False
+    rows = [(pd.Timestamp('2025-06-02') + pd.Timedelta(days=k)).strftime('%Y-%m-%d')
+            for k in range(56)]
+    rows = [(r, 100) for r in rows]
+    rows += [('2025-07-28', 150), ('2025-07-29', 150), ('2025-07-31', 150)]  # 跳周三
+    d = _daily_with_holes(rows)
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['last_week_state'] == 'in_progress'
+    assert f['ip_days'] == 3 and f['ip_contiguous'] is False
+
+    # ④ lagged：前一周缺周三（6 天、非节假日）→ 三态 lagged + 同位置缺天 ok=False
+    rows = [(pd.Timestamp('2025-06-02') + pd.Timedelta(days=k)).strftime('%Y-%m-%d')
+            for k in range(56)]
+    rows = [(r, 100) for r in rows]
+    rows += [('2025-07-28', 100), ('2025-07-29', 100), ('2025-07-31', 100),
+             ('2025-08-01', 100), ('2025-08-02', 100), ('2025-08-03', 100)]  # 缺周三
+    rows += [('2025-08-04', 150), ('2025-08-05', 150), ('2025-08-06', 150)]
+    d = _daily_with_holes(rows)
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['last_week_state'] == 'lagged'
+    assert f['ip_prev_same_ok'] is False and f['ip_prev_same_avg'] is None
+    assert f['ip_units'] == 450 and f['ip_days'] == 3      # lagged 仍报 ip_*（S4 滞后变体用）
+
+    # ⑤ 前一周是假期周且缺天 → 不判 lagged（节假日缺天非数据滞后）
+    rows = [('2025-09-08', 100), ('2025-09-09', 100), ('2025-09-10', 100),
+            ('2025-09-11', 100), ('2025-09-12', 100)]                     # 完整周一 9-08 周
+    rows += [('2025-09-29', 60), ('2025-09-30', 60),
+             ('2025-10-01', 60), ('2025-10-02', 60)]                       # 9-29 假期周 4 天
+    rows += [('2025-10-06', 50), ('2025-10-07', 50), ('2025-10-08', 50)]   # 假期周 3 天
+    d = _daily_with_holes(rows)
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['last_week_state'] == 'in_progress'
+
+    # ⑥ ip_days<3：字段保留（渲染层跳过 S4）
+    d = _mk_daily('2025-06-02', [100] * (7 * 8) + [200, 200])
+    f = metrics.weekly_trend_facts(metrics.weekly_aggregate(d), daily=d)
+    assert f['ip_days'] == 2 and f['ip_daily_avg'] == 200
+
+
+def test_weekly_facts_degrade():
+    """W1b：降级——7 完整周 narrative=false 且字段最小化；恰好 8 启用；
+    12/13 周峰谷边界；26/30 周基准窗边界。"""
+    from analysis import metrics
+
+    # ① 7 完整周 → narrative=false，仅 narrative/n_full_weeks/last_week_state 有值
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 7),
+                                              [3000, 3100, 3200, 3300, 3400, 3500, 3600]))
+    assert f['narrative'] is False and f['n_full_weeks'] == 7
+    assert f['direction'] is None and f['avg4'] is None and f['peak13_units'] is None
+    assert f['ip_units'] is None
+
+    # ② 恰好 8 完整周 → narrative=true、方向可用、峰谷仍 null（<13）
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
+                                              [3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700]))
+    assert f['narrative'] is True and f['direction'] == 'up'
+    assert f['peak13_units'] is None
+
+    # ③ 恰好 13 完整周 → 峰谷启用
+    f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 13),
+                                              [3000 + 10 * k for k in range(13)]))
+    assert f['peak13_units'] == 3120 and f['trough13_units'] == 3000
 
 
 def test_sanitize_bad_values():

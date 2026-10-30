@@ -203,7 +203,7 @@ def _pair_comparable(a, b, hol):
     """
     if (b['week_start'] - a['week_start']).days > 7:
         return False, 'gap'
-    if hol[a['week_start']] or hol[b['week_start']]:
+    if hol(a['week_start']) or hol(b['week_start']):
         return False, 'holiday'
     if a['套数'] == b['套数']:
         return False, 'tie'
@@ -218,7 +218,7 @@ def _pick_extreme(w13, hol, want_max):
         if best_u is None:
             best_ws, best_u = ws, u
         elif u == best_u:
-            if not hol[ws] and hol[best_ws]:    # tie-break：候选非节假日、现任是 → 换
+            if not hol(ws) and hol(best_ws):    # tie-break：候选非节假日、现任是 → 换
                 best_ws, best_u = ws, u
         elif (u > best_u) == want_max:
             best_ws, best_u = ws, u
@@ -229,70 +229,138 @@ def weekly_trend_facts(weekly, daily=None):
     """周度叙述事实（设计 v1.2 §2.1/§3 schema）——纯数据 dict，不含任何文案。
 
     weekly：weekly_aggregate 输出（周口径与 est_days 单一来源）；
-    daily：末周三态与同期对齐用（W1b 起为必传）。
-    W1a 覆盖周侧：方向链（N=链长−1，差一修正）、null 成因（含 gap 实施补充）、
-    last_pair_reversal、post_holiday、峰谷（13 周窗、tie-break 非节假日优先）。
+    daily：末周三态与同期对齐（ip_* 单一来源=末周子集；管线内必传，缺省仅测试用）。
+    覆盖：方向链（N=链长−1）、null 四成因、峰谷（13 周窗）、水位（基准剔近 4 周的
+    ≤26 周、±5% 死区）、末周三态（complete/in_progress/lagged）、同期对齐、
+    narrative 门（n_full<8 字段最小化）。
     """
-    f = {'n_full_weeks': 0, 'last_full_week': None, 'last_full_units': None,
+    f = {'narrative': False, 'n_full_weeks': 0, 'last_week_state': None,
+         'last_full_week': None, 'last_full_units': None,
          'direction': None, 'null_reason': None, 'streak_weeks': 0,
          'last_pair_reversal': False, 'streak_contains_est': False,
-         'post_holiday': False, 'peak13_week': None, 'peak13_units': None,
-         'peak13_est': None, 'peak13_holiday': None,
-         'trough13_week': None, 'trough13_units': None,
-         'trough13_est': None, 'trough13_holiday': None}
+         'post_holiday': False,
+         'avg4': None, 'avg26': None, 'avg26_weeks': 0,
+         'level': None, 'level_gap_pct': None,
+         'peak13_week': None, 'peak13_units': None, 'peak13_est': None,
+         'peak13_holiday': None, 'trough13_week': None, 'trough13_units': None,
+         'trough13_est': None, 'trough13_holiday': None,
+         'ip_week': None, 'ip_units': None, 'ip_days': None,
+         'ip_contiguous': None, 'ip_daily_avg': None,
+         'ip_prev_same_avg': None, 'ip_prev_same_ok': None}
     if weekly is None or weekly.empty:
         return f
-    fw = weekly[weekly['days'] >= 7].sort_values('week_start').reset_index(drop=True)
-    hol = {ws: _is_holiday_week(ws) for ws in fw['week_start']}
+    weekly = weekly.sort_values('week_start').reset_index(drop=True)
+    fw = weekly[weekly['days'] >= 7].reset_index(drop=True)
+    hol_cache = {}
+
+    def hol(ws):
+        if ws not in hol_cache:
+            hol_cache[ws] = _is_holiday_week(ws)
+        return hol_cache[ws]
+
     f['n_full_weeks'] = int(len(fw))
-    if fw.empty:
-        return f
-    last = fw.iloc[-1]
-    f['last_full_week'] = str(last['week_start'].date())
-    f['last_full_units'] = int(last['套数'])
 
-    # 方向链：从末位向前，遇不可比对（缺口/节假日/持平）或方向反转即中断
-    chain = [len(fw) - 1]
-    chain_dir = None
-    first_break = None
-    i = len(fw) - 1
-    while i >= 1:
-        ok, v = _pair_comparable(fw.iloc[i - 1], fw.iloc[i], hol)
-        if not ok:
-            first_break = v
-            break
-        if chain_dir is None:
-            chain_dir = v
-        elif v != chain_dir:
-            break
-        chain.insert(0, i - 1)
-        i -= 1
-    if chain_dir is not None:
-        f['direction'] = 'up' if chain_dir == 1 else 'down'
-        f['streak_weeks'] = len(chain) - 1  # N = 上涨/下跌次数（链 [100,110] → N=1）
+    # ---- 周侧：方向链 + 峰谷（设计 §2.1 判定一/三）----
+    if not fw.empty:
+        last = fw.iloc[-1]
+        f['last_full_week'] = str(last['week_start'].date())
+        f['last_full_units'] = int(last['套数'])
+        chain = [len(fw) - 1]
+        chain_dir = None
+        first_break = None
+        i = len(fw) - 1
+        while i >= 1:
+            ok, v = _pair_comparable(fw.iloc[i - 1], fw.iloc[i], hol)
+            if not ok:
+                first_break = v
+                break
+            if chain_dir is None:
+                chain_dir = v
+            elif v != chain_dir:
+                break
+            chain.insert(0, i - 1)
+            i -= 1
+        if chain_dir is not None:
+            f['direction'] = 'up' if chain_dir == 1 else 'down'
+            f['streak_weeks'] = len(chain) - 1  # N = 上涨/下跌次数（链 [100,110] → N=1）
+        else:
+            f['null_reason'] = {
+                'gap': 'gap',
+                'holiday': 'holiday_last' if hol(last['week_start']) else 'holiday_prev',
+                'tie': 'tie',
+            }.get(first_break)
+        if len(chain) == 2 and chain[0] >= 1:
+            ok, v = _pair_comparable(fw.iloc[chain[0] - 1], fw.iloc[chain[0]], hol)
+            f['last_pair_reversal'] = bool(ok and isinstance(v, int) and v != chain_dir)
+        f['streak_contains_est'] = bool(any(fw.iloc[j]['est_days'] > 0 for j in chain))
+        j0 = chain[0]
+        f['post_holiday'] = bool(j0 >= 1 and hol(fw.iloc[j0 - 1]['week_start']))
+
+        # 峰谷：13 周窗（不足 13 全 None）；谷值保留节假日周候选
+        if len(fw) >= 13:
+            w13 = fw.tail(13)
+            for key, want_max in (('peak13', True), ('trough13', False)):
+                ws, u = _pick_extreme(w13, hol, want_max)
+                row = w13[w13['week_start'] == ws].iloc[0]
+                f[f'{key}_week'] = str(ws.date())
+                f[f'{key}_units'] = u
+                f[f'{key}_est'] = bool(row['est_days'] > 0)
+                f[f'{key}_holiday'] = bool(hol(ws))
+
+        # 水位：avg4 vs 基准（剔近 4 周的最近 ≤26 完整周；基准 <13 → level=null）
+        if len(fw) >= 4:
+            raw4 = float(fw['套数'].tail(4).mean())
+            base = fw.iloc[:-4].tail(26)
+            f['avg4'] = round(raw4, 1)
+            f['avg26_weeks'] = int(len(base))
+            if not base.empty:
+                raw26 = float(base['套数'].mean())
+                f['avg26'] = round(raw26, 1)
+                if len(base) >= 13:
+                    gap = (raw4 - raw26) / raw26 * 100
+                    f['level_gap_pct'] = round(gap, 1)
+                    f['level'] = ('parity' if abs(gap) <= 5
+                                  else 'above' if gap > 0 else 'below')
+
+    # ---- 末周三态 + 同期对齐（设计 §2.1 判定四；ip_* 源自 daily 末周子集）----
+    lw = weekly.iloc[-1]
+    if int(lw['days']) == 7:
+        f['last_week_state'] = 'complete'
     else:
-        f['null_reason'] = {
-            'gap': 'gap',
-            'holiday': 'holiday_last' if hol[last['week_start']] else 'holiday_prev',
-            'tie': 'tie',
-        }.get(first_break)
-    if len(chain) == 2 and chain[0] >= 1:
-        ok, v = _pair_comparable(fw.iloc[chain[0] - 1], fw.iloc[chain[0]], hol)
-        f['last_pair_reversal'] = bool(ok and isinstance(v, int) and v != chain_dir)
-    f['streak_contains_est'] = bool(any(fw.iloc[j]['est_days'] > 0 for j in chain))
-    j0 = chain[0]
-    f['post_holiday'] = bool(j0 >= 1 and hol[fw.iloc[j0 - 1]['week_start']])
+        prev = weekly.iloc[-2] if len(weekly) >= 2 else None
+        if prev is not None and int(prev['days']) < 7 and not hol(prev['week_start']):
+            f['last_week_state'] = 'lagged'
+        else:
+            f['last_week_state'] = 'in_progress'
+        if daily is not None and not daily.empty:
+            ws = lw['week_start']
+            sub = daily[(daily['日期'] >= ws)
+                        & (daily['日期'] <= ws + pd.Timedelta(days=6))]
+            dates = sorted(sub['日期'])
+            f['ip_week'] = str(ws.date())
+            f['ip_days'] = int(len(dates))
+            f['ip_units'] = int(sub['住宅签约套数'].sum())
+            if dates:
+                offs = [(d - ws).days for d in dates]
+                f['ip_contiguous'] = bool(max(offs) - min(offs) + 1 == len(offs))
+                f['ip_daily_avg'] = int(round(f['ip_units'] / f['ip_days']))
+                prev_dates = [d - pd.Timedelta(days=7) for d in dates]
+                have = set(daily['日期'])
+                if all(d in have for d in prev_dates):
+                    s = daily.set_index('日期')['住宅签约套数']
+                    psum = int(sum(s.loc[d] for d in prev_dates))
+                    f['ip_prev_same_avg'] = int(round(psum / len(prev_dates)))
+                    f['ip_prev_same_ok'] = True
+                else:
+                    f['ip_prev_same_ok'] = False
 
-    # 峰谷：13 周窗（不足 13 全 None）；谷值保留节假日周候选（事实低点+解释句价值）
-    if len(fw) >= 13:
-        w13 = fw.tail(13)
-        for key, want_max in (('peak13', True), ('trough13', False)):
-            ws, u = _pick_extreme(w13, hol, want_max)
-            row = w13[w13['week_start'] == ws].iloc[0]
-            f[f'{key}_week'] = str(ws.date())
-            f[f'{key}_units'] = u
-            f[f'{key}_est'] = bool(row['est_days'] > 0)
-            f[f'{key}_holiday'] = bool(hol[ws])
+    # ---- narrative 门：n_full<8 字段最小化（防 verify 直比歧义）----
+    f['narrative'] = bool(len(fw) >= 8)
+    if not f['narrative']:
+        keep = {'narrative', 'n_full_weeks', 'last_week_state'}
+        for k in f:
+            if k not in keep:
+                f[k] = None
     return f
 
 

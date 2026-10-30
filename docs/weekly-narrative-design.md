@@ -123,7 +123,7 @@ lagged      ：days < 7 且 前一周也 days<7 且前一周非节假日周（�
 | streak_weeks | int | **N=上涨/下跌次数**（≥1 才有方向；0=null） |
 | last_pair_reversal | bool | N=1 时互现句依据 |
 | streak_contains_est / post_holiday | bool | 段末注 / "节后"前缀 |
-| avg4 / avg26 | float(round1) / null | avg26=剔除近 4 周的最近 ≤26 完整周均 |
+| avg4 / avg26 / avg26_weeks | float(round1) / float(round1) / int | avg26=剔除近 4 周的最近 ≤26 完整周均；avg26_weeks=基准窗周数（W1b 实施补充，渲染层"半年/有数据以来"措辞依据），<26 触发退化措辞 |
 | level | above/below/parity/null | ±5% 死区；基准 <13 周 null |
 | level_gap_pct | float(round1) / null | |
 | peak13_week/units/est/holiday | str/int/bool/bool | <13 周全 null；tie-break 非节假日优先 |
@@ -173,7 +173,8 @@ fixture 构造器：`_mk_daily(start, weeks, units_pattern, ...)` → 日度 Dat
 |---|---|---|
 | 产品/技术写作 | ①holiday_prev 句"待更多周确认"属预期语气、"连续走势"抽象；②holiday_last 句"假期"两现+公文体；③below"但还没回到"仅 up 通、连词矛盾+软预期；④parity 退化档"的量"悬空语病；⑤N=1 结论句零数字过薄；⑥lagged"数据滞后"读者分不清、"已录得"财经腔；⑦缺时间定位（"最近一周"指哪几天）；⑧holiday_last×谷值同周 S1/S2 双复读"国庆"；⑨满配密度可接受、再裁先裁峰值套数（谷值与解释句绑定不可裁） | 全部采纳（①`节后首周，涨跌走势还看不出来`；②`最近一周恰逢[节日名]，签约受假期影响，本周不作涨跌比较`；③方向中立`仍低于…`；④`…周均水平大体相当`+退化档同构换头；⑤N=1 S1 带值 `成交 X 套`；⑥`本周只统计到 D 天，共 X 套（官方数据更新延迟）`；⑦日期码唯一锚定 S3 末周值 `（M 月 D–D 日当周）`；⑧同周简化句+节日名 S2 唯一承载；⑨裁剪序：峰值套数→锚句→S3 首值） |
 
-**实施修正记录（W1a，2026-10-30）**
+**实施修正记录（W1a/W1b，2026-10-30）**
 
 - null_reason 增补第 4 成因 `gap`（末对周序缺口 >7 天）：原设计三成因漏了链长 1 的缺口路径；句式 `**此前一周数据缺失，暂无可比走势。**`（§2.1/§2.2/§3 已同步）。
 - 峰谷 tie-break 实现曾写反（优先了节假日周），test_weekly_facts_direction ⑩ 抓获后修正——交叉验证价值的即时体现。
+- schema 增补 `avg26_weeks`（基准窗周数）：渲染层需据此选"最近半年/有数据以来"措辞，原 schema 缺该字段（W1b）。
