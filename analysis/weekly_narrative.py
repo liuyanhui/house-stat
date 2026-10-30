@@ -52,27 +52,28 @@ def _date_code(week_str):
 
 
 def _level_phrase(f):
-    """水位短语（方向中立、带差距幅度；基准 <26 周退化'有数据以来'）。空串=无水位句。"""
+    """水位短语——主语显式为'近 4 周的周均'（话术评审：隐藏主语会被读成当前周，
+    3,760 对半年均实为高 6.4%，'低 17.9%'仅在周均主语下成立）。空串=无水位句。"""
     if f.get('level') is None:
         return ''
-    base = '最近半年' if f['avg26_weeks'] >= 26 else '有数据以来'
+    base = '此前半年' if f['avg26_weeks'] >= 26 else '有数据以来'
     gap = f.get('level_gap_pct')
     if f['level'] == 'above':
-        return f'，比{base}的周均高 {gap}%'
+        return f'；近 4 周的周均比{base}高 {gap}%'
     if f['level'] == 'below':
-        return f'，仍比{base}的周均低 {abs(gap)}%'
-    return f'，与{base}的周均大体相当'
+        return f'；近 4 周的周均仍比{base}低 {abs(gap)}%'
+    return f'；近 4 周的周均与{base}大体相当'
 
 
 def _anchor_phrase(f):
-    """锚句（avg4 基准的事实已由 metrics 算好，这里只措辞）。"""
+    """锚句（独立成句、主语=近 4 周的周均；'相当'而非'回到'——均值是匹配不是回归）。"""
     k = f.get('anchor_kind')
     if k == 'week':
-        return f'大约回到 {_xun(f["anchor_week"])}的水平'
+        return f'近 4 周的周均与 {_xun(f["anchor_week"])}的水平相当'
     if k == 'high':
-        return '处于近三个月高位'
+        return '近 4 周的周均处于近三个月高位'
     if k == 'low':
-        return '处于近三个月低位'
+        return '近 4 周的周均处于近三个月低位'
     return ''
 
 
@@ -97,54 +98,55 @@ def _s1(f):
         return f'**{post}成交连续 {f["streak_weeks"]} 周{verb}，累计 {pct}%{lvl}。**'
     est = '（含估算）' if f['streak_contains_est'] else ''
     v = f'{f["last_full_units"]:,}'
+    code = _date_code(f['last_full_week'])  # N=1 无 S3，日期码进 S1（话术评审补设计洞）
     if f['last_pair_reversal']:
-        return f'**{post}近几周有涨有跌，最近一周{verb} {pct}%，成交 {v} 套{est}{lvl}。**'
-    return f'**{post}最近一周{verb} {pct}%，成交 {v} 套{est}{lvl}。**'
+        return (f'**{post}近几周有涨有跌，最近一周（{code}）成交 {v} 套{est}，'
+                f'比上一完整周{verb} {pct}%（单周幅度，属正常波动）{lvl}。**')
+    return (f'**{post}最近一周（{code}）成交 {v} 套{est}，'
+            f'比上一完整周{verb} {pct}%（单周幅度，属正常波动）{lvl}。**')
+
+
+def _est_note(f, kind):
+    """"（其中 N 天为估算）"——天数不计数字预算（话术评审：'含估算'对读者是谜语）。"""
+    n = f.get(f'{kind}_est_days') or 0
+    return f'（其中 {n} 天为估算）' if n else ''
 
 
 def _s2(f):
-    """峰谷时间线故事（任一周值只出现一次；N=1 锚句附尾）。"""
+    """峰谷时间线故事（范围显式为'近三个月'；任一周值只出现一次）。"""
     if f['peak13_week'] is None:
         return ''
     if f['peak13_week'] == f['trough13_week']:
         u = f'{f["peak13_units"]:,}'
-        est = '（含估算）' if f['peak13_est'] else ''
+        est = _est_note(f, 'peak13')
         return f'近三个月每周成交大体持平，都在 {u} 套上下{est}'
     segs = []
     for kind in ('peak13', 'trough13'):
         ws, u = f[f'{kind}_week'], f[f'{kind}_units']
         fest = _festival(ws) if f[f'{kind}_holiday'] else None
-        est = '（含估算）' if f[f'{kind}_est'] else ''
+        est = _est_note(f, kind)
         val = f'{u:,} 套'
         if kind == 'peak13':
-            seg = (f'{fest}假期那周签约 {val}{est}，是近期高点' if fest
-                   else f'{_xun(ws)}曾冲到单周 {val}{est}的高点')
+            seg = (f'{fest}假期那周签约 {val}{est}，是近三个月高点' if fest
+                   else f'{_xun(ws)}曾冲到近三个月的单周高点 {val}{est}')
         else:
-            seg = (f'{fest}假期那周只签了 {val}{est}'
+            seg = (f'{fest}假期那周只签了 {val}{est}，是近三个月的低点'
                    '——假期签约少是每年惯例，不是市场转冷' if fest
-                   else f'{_xun(ws)}见到近期低点（{val}）')
+                   else f'{_xun(ws)}见到近三个月低点（{val}）')
         segs.append((ws, seg))
     segs.sort()
-    out = '；'.join(s for _, s in segs)
-    if f['direction'] is not None and f['streak_weeks'] == 1:
-        a = _anchor_phrase(f)
-        if a:
-            out += f'，{a}'
-    return out
+    return '；'.join(s for _, s in segs)
 
 
 def _s3(f):
-    """链值细节 + 日期码 + 锚句（N≥2；链首已见于 S2 时去重）。"""
+    """链值细节 + 日期码（N≥2；链首已见于 S2 时去重；锚句独立成句由 render 插入）。"""
     if f['direction'] is None or f['streak_weeks'] < 2:
         return ''
     verb = '回升' if f['direction'] == 'up' else '回落'
     tail = f'{f["last_full_units"]:,} 套（{_date_code(f["last_full_week"])}）'
     if f['chain_first_week'] in (f['peak13_week'], f['trough13_week']):
-        body = f'此间{verb}到 {tail}'
-    else:
-        body = f'从 {f["chain_first_units"]:,} 套{verb}到 {tail}'
-    a = _anchor_phrase(f)
-    return body + (f'，{a}' if a else '')
+        return f'此间{verb}到 {tail}'
+    return f'从 {f["chain_first_units"]:,} 套{verb}到 {tail}'
 
 
 def _s4(f):
@@ -161,11 +163,11 @@ def _s4(f):
         b = f['ip_prev_same_avg']
         still = '仍' if f['direction'] == 'up' else ''
         if a > b:
-            tail = f'{still}高于上周同期的日均 {b} 套'
+            tail = f'{still}高于上一完整周同期的日均 {b} 套'
         elif a < b:
-            tail = f'低于上周同期的日均 {b} 套'
+            tail = f'低于上一完整周同期的日均 {b} 套'
         else:
-            tail = f'与上周同期的日均 {b} 套持平'
+            tail = f'与上一完整周同期的日均 {b} 套持平'
         return f'本周刚过 {f["ip_days"]} 天，日均 {a} 套，{tail}'
     return f'本周刚过 {f["ip_days"]} 天，已签 {f["ip_units"]:,} 套'
 
@@ -182,7 +184,8 @@ def render(facts):
     """facts dict → md 段落（界定符包裹）。narrative=false → 空串（无界定符）。"""
     if not facts or not facts.get('narrative'):
         return ''
-    parts = [p for p in (_s1(facts), _s2(facts), _s3(facts), _s4(facts)) if p]
+    anchor = _anchor_phrase(facts) if facts.get('direction') is not None else ''
+    parts = [p for p in (_s1(facts), _s2(facts), _s3(facts), anchor, _s4(facts)) if p]
     para = parts[0] + ''.join(f'{p}。' for p in parts[1:])
     note = _s5(facts)
     body = para + (f'\n\n{note}' if note else '')

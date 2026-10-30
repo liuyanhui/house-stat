@@ -245,8 +245,9 @@ def weekly_trend_facts(weekly, daily=None):
          'avg4': None, 'avg26': None, 'avg26_weeks': 0,
          'level': None, 'level_gap_pct': None,
          'peak13_week': None, 'peak13_units': None, 'peak13_est': None,
-         'peak13_holiday': None, 'trough13_week': None, 'trough13_units': None,
-         'trough13_est': None, 'trough13_holiday': None,
+         'peak13_est_days': None, 'peak13_holiday': None,
+         'trough13_week': None, 'trough13_units': None, 'trough13_est': None,
+         'trough13_est_days': None, 'trough13_holiday': None,
          'ip_week': None, 'ip_units': None, 'ip_days': None,
          'ip_contiguous': None, 'ip_daily_avg': None,
          'ip_prev_same_avg': None, 'ip_prev_same_ok': None}
@@ -314,6 +315,7 @@ def weekly_trend_facts(weekly, daily=None):
                 f[f'{key}_week'] = str(ws.date())
                 f[f'{key}_units'] = u
                 f[f'{key}_est'] = bool(row['est_days'] > 0)
+                f[f'{key}_est_days'] = int(row['est_days'])  # "其中 N 天为估算"用（话术评审）
                 f[f'{key}_holiday'] = bool(hol(ws))
 
         # 水位：avg4 vs 基准（剔近 4 周的最近 ≤26 完整周；基准 <13 → level=null）

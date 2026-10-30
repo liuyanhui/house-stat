@@ -403,8 +403,10 @@ def _facts(**over):
         chain_first_week='2026-10-12', chain_first_units=3502,
         anchor_kind='week', anchor_week='2026-09-07',
         avg4=2972.3, avg26=3423.0, avg26_weeks=26, level='below', level_gap_pct=-13.2,
-        peak13_week='2026-09-14', peak13_units=4257, peak13_est=True, peak13_holiday=False,
-        trough13_week='2026-10-05', trough13_units=2098, trough13_est=False, trough13_holiday=True,
+        peak13_week='2026-09-14', peak13_units=4257, peak13_est=True, peak13_est_days=1,
+        peak13_holiday=False,
+        trough13_week='2026-10-05', trough13_units=2098, trough13_est=False,
+        trough13_est_days=0, trough13_holiday=True,
         ip_week='2026-10-26', ip_units=1879, ip_days=3, ip_contiguous=True,
         ip_daily_avg=626, ip_prev_same_avg=537, ip_prev_same_ok=True)
     base.update(over)
@@ -421,11 +423,12 @@ def test_weekly_narrative_render():
     out = wn.render(_facts())
     assert out.count(wn.DELIM) == 2
     para = out.split(wn.DELIM)[1].strip()
-    assert para.startswith('**节后成交连续 2 周回升，累计 7.4%，仍比最近半年的周均低 13.2%。**')
-    assert '国庆假期那周只签了 2,098 套——假期签约少是每年惯例，不是市场转冷' in para
-    assert '9 月中旬曾冲到单周 4,257 套（含估算）的高点' in para
-    assert '从 3,502 套回升到 3,760 套（10 月 19–25 日当周），大约回到 9 月上旬的水平' in para
-    assert '本周刚过 3 天，日均 626 套，仍高于上周同期的日均 537 套' in para
+    assert para.startswith('**节后成交连续 2 周回升，累计 7.4%；近 4 周的周均仍比此前半年低 13.2%。**')
+    assert '国庆假期那周只签了 2,098 套，是近三个月的低点——假期签约少是每年惯例，不是市场转冷' in para
+    assert '9 月中旬曾冲到近三个月的单周高点 4,257 套（其中 1 天为估算）' in para
+    assert '从 3,502 套回升到 3,760 套（10 月 19–25 日当周）' in para
+    assert '近 4 周的周均与 9 月上旬的水平相当。' in para   # 锚句独立成句、主语=周均
+    assert '本周刚过 3 天，日均 626 套，仍高于上一完整周同期的日均 537 套' in para
     assert '含 1 个估算周，估算日清单见"数据说明"' in para
     assert para.count('当周）') == 1                       # 日期码全段唯一
     nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+|\d+(?:\.\d+)?%', para)
@@ -433,16 +436,18 @@ def test_weekly_narrative_render():
     for bad in ('预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱'):
         assert bad not in para, bad                        # 禁用词（封闭表暂内联，W4 迁 verify）
 
-    # ② est×节假日叠加（谷值含估算）：节日名在前、括注随后
-    out = wn.render(_facts(trough13_est=True))
-    assert '国庆假期那周只签了 2,098 套（含估算）——假期签约少是每年惯例' in out
+    # ② est×节假日叠加（谷值含估算）：节日名在前、天数括注随后
+    out = wn.render(_facts(trough13_est=True, trough13_est_days=1))
+    assert '国庆假期那周只签了 2,098 套（其中 1 天为估算），是近三个月的低点' in out
 
-    # ③ N=1 带值 / 互现：结论句带幅度与数字；锚句移至 S2 尾
+    # ③ N=1 带值 / 互现：基准显式（比上一完整周）+ 单周波动限定语 + 日期码进 S1
     out = wn.render(_facts(streak_weeks=1, last_pair_reversal=False))
-    assert '**节后最近一周回升 7.4%，成交 3,760 套' in out
+    assert ('**节后最近一周（10 月 19–25 日当周）成交 3,760 套（含估算），'
+            '比上一完整周回升 7.4%（单周幅度，属正常波动）') in out
     assert '从 3,502 套' not in out                         # 无 S3
+    assert '近 4 周的周均与 9 月上旬的水平相当' in out       # 锚句仍在（独立句）
     out = wn.render(_facts(streak_weeks=1, last_pair_reversal=True))
-    assert '**节后近几周有涨有跌，最近一周回升 7.4%，成交 3,760 套' in out
+    assert '**节后近几周有涨有跌，最近一周（10 月 19–25 日当周）成交 3,760 套' in out
 
     # ④ null 四句式 + 同周谷值简化（holiday_last 场景末完整周=假期周，场景须自洽）
     out = wn.render(_facts(direction=None, null_reason='holiday_last',
@@ -458,14 +463,14 @@ def test_weekly_narrative_render():
     out = wn.render(_facts(direction=None, null_reason='gap'))
     assert '**此前一周数据缺失，暂无可比走势' in out
 
-    # ⑤ 水位短语三档（带幅度） + 退化档；节假日不触发负例
+    # ⑤ 水位短语三档（主语=近 4 周的周均） + 退化档；节假日不触发负例
     out = wn.render(_facts(level='above', level_gap_pct=9.9))
-    assert '比最近半年的周均高 9.9%' in out and '转冷' in out    # 谷值仍是节假日周（场景设定）
+    assert '近 4 周的周均比此前半年高 9.9%' in out and '转冷' in out  # 谷值仍是节假日周（场景设定）
     out = wn.render(_facts(level='parity', avg26_weeks=20))
-    assert '与有数据以来的周均大体相当' in out
+    assert '近 4 周的周均与有数据以来大体相当' in out
     out = wn.render(_facts(trough13_holiday=False))
     assert '假期' not in out.split('。')[1] if '。' in out else True
-    assert '见到近期低点（2,098 套）' in out
+    assert '见到近三个月低点（2,098 套）' in out
 
     # ⑥ S4 变体：仅报本周 / lagged / days<3 跳过 / complete 不出现
     out = wn.render(_facts(ip_prev_same_ok=False))
