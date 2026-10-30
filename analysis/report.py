@@ -11,7 +11,7 @@ import numpy as np
 
 import config
 import quality
-from . import load, metrics, charts
+from . import load, metrics, charts, weekly_narrative
 
 
 def _fmt(v, spec=',.0f'):
@@ -69,6 +69,8 @@ def generate():
     aua = metrics.avg_unit_area(monthly)
     rank = metrics.district_rank_change(district) if not district.empty else pd.DataFrame()
     weekly = metrics.weekly_aggregate(daily) if not daily.empty else pd.DataFrame()
+    # 周度叙述事实（W3）：与叙述段同次产出落 wk_facts.json，供 verify 独立重算直比
+    wk_facts = metrics.weekly_trend_facts(weekly, daily) if not daily.empty else None
 
     # 画图（charts 引擎：PNG 与 charts/<stem>.json 同 stem 成对产出，T1.4b）
     def _chart(spec):
@@ -153,6 +155,14 @@ def generate():
         json.dump(quality.dataset_meta(periods, generated_at=gen_at), f,
                   ensure_ascii=False)
 
+    # wk_facts.json：daily 非空必写；daily 空 → 删遗留（干净房间补漏，防旧文件冒充新产物）
+    wk_facts_path = os.path.join(config.REPORT_DIR, 'wk_facts.json')
+    if wk_facts is not None:
+        with open(wk_facts_path, 'w', encoding='utf-8') as f:
+            json.dump(wk_facts, f, ensure_ascii=False, allow_nan=False)
+    elif os.path.isfile(wk_facts_path):
+        os.remove(wk_facts_path)
+
     md = []
     md.append('# 北京二手住宅成交趋势报告\n')
     md.append(f'> 数据范围：{span}（共 {len(monthly)} 个月）· 数据来源：北京市住建委（官方自爬）· 仅历史趋势，不含预测\n')
@@ -225,23 +235,6 @@ def generate():
     if not weekly.empty and imgs.get('weekly'):
         n_wk = len(weekly)
         partial_n = int((weekly['days'] < 7).sum())
-        wk_latest = weekly.iloc[-1]
-        wk_prev = weekly.iloc[-2] if len(weekly) > 1 else None
-        est_note = f'，含估算 {int(wk_latest["est_days"])} 天' if wk_latest.get('est_days', 0) else ''
-        if (int(wk_latest['days']) < 7 and wk_prev is not None
-                and int(wk_prev['days']) >= 7):
-            # 进行中周：与满周不可比，禁总量环比（O1），改日均口径
-            avg_now = wk_latest['套数'] / wk_latest['days']
-            avg_prev = wk_prev['套数'] / wk_prev['days']
-            d_avg = (avg_now - avg_prev) / avg_prev * 100 if avg_prev else np.nan
-            wk_note = (f'\n*最新周 {wk_latest["week_start"].date()}（进行中，仅 '
-                       f'{int(wk_latest["days"])} 天{est_note}）：{int(wk_latest["套数"]):,} 套，'
-                       f'日均 {avg_now:.0f} 套（上周日均 {avg_prev:.0f}，日均环比 {_pct(d_avg)}）。'
-                       '不完整周不做总量环比。*\n')
-        else:
-            wk_mom = ((wk_latest['套数'] - wk_prev['套数']) / wk_prev['套数'] * 100) if wk_prev is not None else np.nan
-            wk_note = (f'\n*最新周 {wk_latest["week_start"].date()}：{int(wk_latest["套数"]):,} 套 / '
-                       f'{wk_latest["面积"]:,.0f} m²，环比 {_pct(wk_mom)}{est_note}。*\n')
         md.append(f'> 基于 {n_wk} 个自然周（{weekly["week_start"].iloc[0].date()} ~ '
                   f'{weekly["week_start"].iloc[-1].date()}）。周度粒度比月度更能反映短期动能。\n')
         md.append(f'\n![周度趋势]({imgs["weekly"]})\n')
@@ -252,6 +245,10 @@ def generate():
                   + '橙柱=不满 7 天（节假日/缺口，数值偏低）；'
                   + '红线=4 周移动均值，绿线=周度面积（右轴）。'
                   + f'（不完整周共 {partial_n} 周）*\n')
+        # 周度叙述（W3，普通读者口径；取代原 wk_note——信息由 S1–S5 承载）。
+        # narrative=false（完整周 <8）时 render 返回空串、无界定符，退回图+表现状。
+        if wk_facts is not None and wk_facts.get('narrative'):
+            md.append('\n' + weekly_narrative.render(wk_facts) + '\n')
         md.append('\n### 近 10 周\n')
         wrows = []
         for _, r in weekly.iloc[::-1].head(10).iterrows():
@@ -261,7 +258,7 @@ def generate():
                           f"{r['面积']:,.0f}", f"{r['套均面积']:.1f}",
                           f"{int(r['days'])}{mark}{est_mark}"])
         md.append(_table(['周起始(周一)', '住宅网签(套)', '住宅面积(m²)', '套均(m²)', '天数'], wrows))
-        md.append(wk_note)
+        md.append('')
 
         # 周度套均面积连续趋势（面积结构走向的代理信号）
         if imgs.get('weekly_aua'):

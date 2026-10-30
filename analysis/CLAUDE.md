@@ -16,7 +16,11 @@
 - 口径防护（M1）：`add_yoy_mom`（断档环比 NaN；同比需连续段 ≥13 月）、`sanitize_bad_values`（2025-01 面积坏值→NaN，供整窗规则）、`weekly_aggregate`（`_week_bucket` 共用周口径；`est_days`/`MA4含估算` 估算标记随聚合传播）、`expand_estimated_days`。
 - 累计与结构（M2）：`add_ttm`（12 月连续+值全有效才出值）、`add_ytd`（等窗，年内缺月/NaN 前缀污染整段无效）、`nonresidential_share`（'总>住宅'守卫）。
 - 新房与机构（M3）：`new_home_weekly`（认购/签约=期房+现房住宅）、`new_inventory`（库存快照）、`district_mom`（区县月度环比，首月无值+断档防护）、`agency_refund`（当月+3月滚动均 Σ/Σ，断档整窗空）、`agency_top`（上榜内份额）、`annual_anchor`（官方年度+满 12 月年份月度和）。
+- 周度叙述事实（W，设计 v1.4）：`weekly_trend_facts(weekly, daily)`——方向链（N=链长−1、节假日/持平/缺口中断、估算不中断、null 四成因）、水位（基准=剔近 4 周的 ≤26 周均、±5% 死区）、13 周峰谷（tie-break 非节假日优先）、末周三态（complete/in_progress/lagged，纯数据锚无时钟）、进行中周同期对齐、narrative 门（完整周 <8 字段最小化）。**纯 dict 不含文案**；verify 侧另有一套 CSV 独立重算，两边规则须逐字对齐（改任一侧先同步设计文档）。节假日周=`chinese_calendar` 周内工作日净额 ≤3。
 - 其余：`add_moving_avg`、`avg_unit_area`、`district_share`/`district_rank_change`、`segment_share`、`coverage_counts`。
+
+### `weekly_narrative.py`（W）
+周度叙述渲染：`render(facts) -> str` **纯函数**（只读 facts dict，不反查 DataFrame；文案全在此层）。S1 结论句（五变体，趋势量化：N=1 单周环比/N≥2 链累计，主语/基准显式）+ S2 峰谷时间线（"近三个月"范围、节日名英文映射、`（其中 N 天为估算）`）+ S3 链值+唯一日期码 + 锚句（独立成句，主语=近 4 周的周均）+ S4 进行中/滞后周 + S5 段末注；输出以 `<!-- wk-narrative -->` 起止包裹（verify 定界）。禁用词封闭表在 `verify.py`（WK_BANNED_WORDS）。
 
 ### `charts.py`（M1 起，替代已退役的 plots.py）
 图表引擎：**ChartSpec 单一来源 → 双 sink**。spec 为纯 dict（kind/series/axes/annotations），拟合/均线/份额一律 prep 算好，sink 只画不算。
@@ -27,7 +31,7 @@
 - 迁移期像素比对工具：`tests/pixel_diff.py`（超容差→人工复核记录）。
 
 ### `report.py`
-组装 `report/trend_report.md`：摘要 / 全市 / 周度 / 区域 / 市场结构 / 数据说明。图表经 `charts.prep_*` + `write_chart` 产出；`<!-- toc -->` 占位（html_render 渲染目录）。媒体 H1 参考表已移除（根 CLAUDE.md 约定 12）。**仅生成 md，不耦合 html**——HTML 由 html_render 从成品 md 转换。
+组装 `report/trend_report.md`：摘要 / 全市 / 周度 / 区域 / 市场结构 / 数据说明。图表经 `charts.prep_*` + `write_chart` 产出；`<!-- toc -->` 占位（html_render 渲染目录）。媒体 H1 参考表已移除（根 CLAUDE.md 约定 12）。**仅生成 md，不耦合 html**——HTML 由 html_render 从成品 md 转换。周度节含叙述段（W3）：图注后、近 10 周表前插 `weekly_narrative.render(wk_facts)`（取代原 wk_note）；`wk_facts.json` 与叙述段同次落盘（daily 空 → 删遗留）。
 
 ### `html_render.py`
 Markdown→自包含 HTML 转换器（零第三方依赖，stdlib only）。
