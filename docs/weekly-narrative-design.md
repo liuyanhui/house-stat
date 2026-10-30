@@ -178,3 +178,9 @@ fixture 构造器：`_mk_daily(start, weeks, units_pattern, ...)` → 日度 Dat
 - null_reason 增补第 4 成因 `gap`（末对周序缺口 >7 天）：原设计三成因漏了链长 1 的缺口路径；句式 `**此前一周数据缺失，暂无可比走势。**`（§2.1/§2.2/§3 已同步）。
 - 峰谷 tie-break 实现曾写反（优先了节假日周），test_weekly_facts_direction ⑩ 抓获后修正——交叉验证价值的即时体现。
 - schema 增补 `avg26_weeks`（基准窗周数）：渲染层需据此选"最近半年/有数据以来"措辞，原 schema 缺该字段（W1b）。
+
+**实施修正记录（W2，2026-10-30）**
+
+- schema 增补 `chain_first_week/chain_first_units`（S3"从 X 回到 Y"需要链首值）与 `anchor_kind/anchor_week`（锚句候选需遍历 13 周窗，纯函数渲染器无序列，必须事实层算好）。
+- S5 段末注原范本"估算**口径**见数据说明"撞禁用词表（'口径'在封闭表内、扫描范围正是叙述段）——改写为"估算日清单见'数据说明'"。
+- 节日名映射：chinese_calendar 1.11 的 `get_holiday_detail` 返回**英文**名（'National Day' 等），映射表按英文键建；含估算括注统一为紧跟数值式"4,257 套（含估算）"。

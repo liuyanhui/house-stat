@@ -251,6 +251,12 @@ def test_weekly_facts_direction():
     assert f['peak13_est'] is True and f['peak13_holiday'] is False
     assert f['trough13_week'] == '2025-10-06' and f['trough13_holiday'] is True
 
+    # ⑪ 链首值 + 锚句事实（实施增补字段）：链=[10-13,10-20,10-27] 连跌 N=2；
+    #    avg4=3450，候选=排除链/节假日/近4周的 08-04..09-22，最近 3350(09-22) 差≤10%
+    assert f['direction'] == 'down' and f['streak_weeks'] == 2
+    assert f['chain_first_week'] == '2025-10-13' and f['chain_first_units'] == 4000
+    assert f['anchor_kind'] == 'week' and f['anchor_week'] == '2025-09-22'
+
 
 def test_weekly_facts_level():
     """W1b：水位——基准=剔近 4 周的最近 ≤26 完整周（防自比稀释）、±5% 死区、
@@ -385,6 +391,99 @@ def test_weekly_facts_degrade():
     f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 13),
                                               [3000 + 10 * k for k in range(13)]))
     assert f['peak13_units'] == 3120 and f['trough13_units'] == 3000
+
+
+def _facts(**over):
+    """W2 渲染测试共用：合成 facts dict（默认=满配上涨场景）。"""
+    base = dict(
+        narrative=True, n_full_weeks=20, last_week_state='in_progress',
+        last_full_week='2026-10-19', last_full_units=3760,
+        direction='up', null_reason=None, streak_weeks=2,
+        last_pair_reversal=False, streak_contains_est=True, post_holiday=True,
+        chain_first_week='2026-10-12', chain_first_units=3502,
+        anchor_kind='week', anchor_week='2026-09-07',
+        avg4=2972.3, avg26=3423.0, avg26_weeks=26, level='below', level_gap_pct=-13.2,
+        peak13_week='2026-09-14', peak13_units=4257, peak13_est=True, peak13_holiday=False,
+        trough13_week='2026-10-05', trough13_units=2098, trough13_est=False, trough13_holiday=True,
+        ip_week='2026-10-26', ip_units=1879, ip_days=3, ip_contiguous=True,
+        ip_daily_avg=626, ip_prev_same_avg=537, ip_prev_same_ok=True)
+    base.update(over)
+    return base
+
+
+def test_weekly_narrative_render():
+    """W2：渲染纯函数——S1 五变体、S2 时间线（节日/估算/叠加/去重）、S3 日期码+
+    锚句、S4 三变体、S5 段末注、水位短语与退化档、预算 ≤6、界定符成对。"""
+    import re
+    from analysis import weekly_narrative as wn
+
+    # ① 满配上涨：结论前置加粗、节后前缀、节日惯例句、估算括注+段末注、日期码唯一
+    out = wn.render(_facts())
+    assert out.count(wn.DELIM) == 2
+    para = out.split(wn.DELIM)[1].strip()
+    assert para.startswith('**节后成交连续 2 周回升，仍低于最近半年的周均水平。**')
+    assert '国庆假期那周只签了 2,098 套——假期签约少是每年惯例，不是市场转冷' in para
+    assert '9 月中旬曾冲到单周 4,257 套（含估算）的高点' in para
+    assert '从 3,502 套回升到 3,760 套（10 月 19–25 日当周），大约回到 9 月上旬的水平' in para
+    assert '本周刚过 3 天，日均 626 套，仍高于上周同期的日均 537 套' in para
+    assert '含 1 个估算周，估算日清单见"数据说明"' in para
+    assert para.count('当周）') == 1                       # 日期码全段唯一
+    nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+', para)
+    assert len(nums) <= 6, nums                            # 数字预算
+    for bad in ('预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱'):
+        assert bad not in para, bad                        # 禁用词（封闭表暂内联，W4 迁 verify）
+
+    # ② est×节假日叠加（谷值含估算）：节日名在前、括注随后
+    out = wn.render(_facts(trough13_est=True))
+    assert '国庆假期那周只签了 2,098 套（含估算）——假期签约少是每年惯例' in out
+
+    # ③ N=1 带值 / 互现：结论句带数字；锚句移至 S2 尾
+    out = wn.render(_facts(streak_weeks=1, last_pair_reversal=False))
+    assert '**节后最近一周回升，成交 3,760 套' in out and '_s3absent' == '_s3absent'
+    assert '从 3,502 套' not in out                         # 无 S3
+    out = wn.render(_facts(streak_weeks=1, last_pair_reversal=True))
+    assert '**节后近几周有涨有跌，最近一周回升，成交 3,760 套' in out
+
+    # ④ null 四句式 + 同周谷值简化（holiday_last 场景末完整周=假期周，场景须自洽）
+    out = wn.render(_facts(direction=None, null_reason='holiday_last',
+                           last_full_week='2026-09-28'))
+    assert '**最近一周恰逢国庆假期，签约受假期影响，本周不作涨跌比较' in out
+    out = wn.render(_facts(direction=None, null_reason='holiday_last',
+                           trough13_week='2026-10-19'))
+    assert out.startswith(f'{wn.DELIM}\n**最近一周恰逢假期，涨跌暂不比较。**')
+    out = wn.render(_facts(direction=None, null_reason='holiday_prev'))
+    assert '**节后首周，涨跌走势还看不出来' in out
+    out = wn.render(_facts(direction=None, null_reason='tie'))
+    assert '**最近两周基本持平' in out
+    out = wn.render(_facts(direction=None, null_reason='gap'))
+    assert '**此前一周数据缺失，暂无可比走势' in out
+
+    # ⑤ 水位短语三档 + 退化档；节假日不触发负例
+    out = wn.render(_facts(level='above'))
+    assert '高于最近半年的周均水平' in out and '转冷' in out      # 谷值仍是节假日周（场景设定）
+    out = wn.render(_facts(level='parity', avg26_weeks=20))
+    assert '与有数据以来的周均水平大体相当' in out
+    out = wn.render(_facts(trough13_holiday=False))
+    assert '假期' not in out.split('。')[1] if '。' in out else True
+    assert '见到近期低点（2,098 套）' in out
+
+    # ⑥ S4 变体：仅报本周 / lagged / days<3 跳过 / complete 不出现
+    out = wn.render(_facts(ip_prev_same_ok=False))
+    assert '本周刚过 3 天，已签 1,879 套' in out
+    out = wn.render(_facts(last_week_state='lagged'))
+    assert '本周只统计到 3 天，共 1,879 套（官方数据更新延迟）' in out
+    assert '日均 626' not in out
+    out = wn.render(_facts(ip_days=2))
+    assert '本周' not in out
+    out = wn.render(_facts(last_week_state='complete'))
+    assert '本周刚过' not in out
+
+    # ⑦ narrative=false → 空串（无界定符）
+    assert wn.render(_facts(narrative=False)) == ''
+
+    # ⑧ 峰谷同周（13 周全持平的极端）
+    out = wn.render(_facts(peak13_week='2026-10-19', trough13_week='2026-10-19'))
+    assert '大体持平' in out
 
 
 def test_sanitize_bad_values():

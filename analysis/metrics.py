@@ -239,6 +239,8 @@ def weekly_trend_facts(weekly, daily=None):
          'direction': None, 'null_reason': None, 'streak_weeks': 0,
          'last_pair_reversal': False, 'streak_contains_est': False,
          'post_holiday': False,
+         'chain_first_week': None, 'chain_first_units': None,
+         'anchor_kind': 'none', 'anchor_week': None,
          'avg4': None, 'avg26': None, 'avg26_weeks': 0,
          'level': None, 'level_gap_pct': None,
          'peak13_week': None, 'peak13_units': None, 'peak13_est': None,
@@ -283,6 +285,10 @@ def weekly_trend_facts(weekly, daily=None):
         if chain_dir is not None:
             f['direction'] = 'up' if chain_dir == 1 else 'down'
             f['streak_weeks'] = len(chain) - 1  # N = 上涨/下跌次数（链 [100,110] → N=1）
+            if len(chain) >= 2:                 # S3"从 X 回到 Y"需要链首值（实施增补）
+                cf = fw.iloc[chain[0]]
+                f['chain_first_week'] = str(cf['week_start'].date())
+                f['chain_first_units'] = int(cf['套数'])
         else:
             f['null_reason'] = {
                 'gap': 'gap',
@@ -321,6 +327,29 @@ def weekly_trend_facts(weekly, daily=None):
                     f['level_gap_pct'] = round(gap, 1)
                     f['level'] = ('parity' if abs(gap) <= 5
                                   else 'above' if gap > 0 else 'below')
+
+            # 锚句事实（实施增补）：候选=13 周窗内排除链上/节假日/近 4 周各周，
+            # 与 avg4 差 ≤10% 的最近周；无则 avg4 为窗口极值时高/低位，再否则 none
+            if len(fw) >= 13:
+                w13 = fw.tail(13)
+                chain_set = {fw.iloc[j]['week_start'] for j in chain}
+                last4_start = fw['week_start'].iloc[-4]
+                cand = [r for _, r in w13.iterrows()
+                        if r['week_start'] not in chain_set
+                        and not hol(r['week_start'])
+                        and r['week_start'] < last4_start]
+                hit = None
+                if cand:
+                    close = min(cand, key=lambda r: abs(int(r['套数']) - raw4))
+                    if abs(int(close['套数']) - raw4) <= 0.10 * raw4:
+                        hit = close
+                if hit is not None:
+                    f['anchor_kind'] = 'week'
+                    f['anchor_week'] = str(hit['week_start'].date())
+                elif all(raw4 > int(u) for u in w13['套数']):
+                    f['anchor_kind'] = 'high'
+                elif all(raw4 < int(u) for u in w13['套数']):
+                    f['anchor_kind'] = 'low'
 
     # ---- 末周三态 + 同期对齐（设计 §2.1 判定四；ip_* 源自 daily 末周子集）----
     lw = weekly.iloc[-1]
