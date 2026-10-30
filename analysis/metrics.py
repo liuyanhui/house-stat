@@ -237,6 +237,7 @@ def weekly_trend_facts(weekly, daily=None):
     f = {'narrative': False, 'n_full_weeks': 0, 'last_week_state': None,
          'last_full_week': None, 'last_full_units': None,
          'direction': None, 'null_reason': None, 'streak_weeks': 0,
+         'streak_change_pct': None,
          'last_pair_reversal': False, 'streak_contains_est': False,
          'post_holiday': False,
          'chain_first_week': None, 'chain_first_units': None,
@@ -285,8 +286,10 @@ def weekly_trend_facts(weekly, daily=None):
         if chain_dir is not None:
             f['direction'] = 'up' if chain_dir == 1 else 'down'
             f['streak_weeks'] = len(chain) - 1  # N = 上涨/下跌次数（链 [100,110] → N=1）
+            cf = fw.iloc[chain[0]]
+            f['streak_change_pct'] = round(  # 链首→末周幅度（N=1 即单周环比）
+                (int(last['套数']) - int(cf['套数'])) / int(cf['套数']) * 100, 1)
             if len(chain) >= 2:                 # S3"从 X 回到 Y"需要链首值（实施增补）
-                cf = fw.iloc[chain[0]]
                 f['chain_first_week'] = str(cf['week_start'].date())
                 f['chain_first_units'] = int(cf['套数'])
         else:

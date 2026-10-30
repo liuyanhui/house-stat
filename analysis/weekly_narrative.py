@@ -52,13 +52,16 @@ def _date_code(week_str):
 
 
 def _level_phrase(f):
-    """水位短语（方向中立；基准 <26 周退化'有数据以来'）。空串=无水位句。"""
+    """水位短语（方向中立、带差距幅度；基准 <26 周退化'有数据以来'）。空串=无水位句。"""
     if f.get('level') is None:
         return ''
     base = '最近半年' if f['avg26_weeks'] >= 26 else '有数据以来'
-    return {'above': f'，高于{base}的周均水平',
-            'below': f'，仍低于{base}的周均水平',
-            'parity': f'，与{base}的周均水平大体相当'}[f['level']]
+    gap = f.get('level_gap_pct')
+    if f['level'] == 'above':
+        return f'，比{base}的周均高 {gap}%'
+    if f['level'] == 'below':
+        return f'，仍比{base}的周均低 {abs(gap)}%'
+    return f'，与{base}的周均大体相当'
 
 
 def _anchor_phrase(f):
@@ -89,13 +92,14 @@ def _s1(f):
         return f'**此前一周数据缺失，暂无可比走势{lvl}。**'
     verb = '回升' if f['direction'] == 'up' else '回落'
     post = '节后' if f['post_holiday'] else ''
+    pct = f.get('streak_change_pct')
     if f['streak_weeks'] >= 2:
-        return f'**{post}成交连续 {f["streak_weeks"]} 周{verb}{lvl}。**'
+        return f'**{post}成交连续 {f["streak_weeks"]} 周{verb}，累计 {pct}%{lvl}。**'
     est = '（含估算）' if f['streak_contains_est'] else ''
     v = f'{f["last_full_units"]:,}'
     if f['last_pair_reversal']:
-        return f'**{post}近几周有涨有跌，最近一周{verb}，成交 {v} 套{est}{lvl}。**'
-    return f'**{post}最近一周{verb}，成交 {v} 套{est}{lvl}。**'
+        return f'**{post}近几周有涨有跌，最近一周{verb} {pct}%，成交 {v} 套{est}{lvl}。**'
+    return f'**{post}最近一周{verb} {pct}%，成交 {v} 套{est}{lvl}。**'
 
 
 def _s2(f):

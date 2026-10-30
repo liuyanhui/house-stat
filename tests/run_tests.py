@@ -398,7 +398,7 @@ def _facts(**over):
     base = dict(
         narrative=True, n_full_weeks=20, last_week_state='in_progress',
         last_full_week='2026-10-19', last_full_units=3760,
-        direction='up', null_reason=None, streak_weeks=2,
+        direction='up', null_reason=None, streak_weeks=2, streak_change_pct=7.4,
         last_pair_reversal=False, streak_contains_est=True, post_holiday=True,
         chain_first_week='2026-10-12', chain_first_units=3502,
         anchor_kind='week', anchor_week='2026-09-07',
@@ -421,15 +421,15 @@ def test_weekly_narrative_render():
     out = wn.render(_facts())
     assert out.count(wn.DELIM) == 2
     para = out.split(wn.DELIM)[1].strip()
-    assert para.startswith('**节后成交连续 2 周回升，仍低于最近半年的周均水平。**')
+    assert para.startswith('**节后成交连续 2 周回升，累计 7.4%，仍比最近半年的周均低 13.2%。**')
     assert '国庆假期那周只签了 2,098 套——假期签约少是每年惯例，不是市场转冷' in para
     assert '9 月中旬曾冲到单周 4,257 套（含估算）的高点' in para
     assert '从 3,502 套回升到 3,760 套（10 月 19–25 日当周），大约回到 9 月上旬的水平' in para
     assert '本周刚过 3 天，日均 626 套，仍高于上周同期的日均 537 套' in para
     assert '含 1 个估算周，估算日清单见"数据说明"' in para
     assert para.count('当周）') == 1                       # 日期码全段唯一
-    nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+', para)
-    assert len(nums) <= 6, nums                            # 数字预算
+    nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+|\d+(?:\.\d+)?%', para)
+    assert len(nums) <= 8, nums                            # 数字预算（含量化百分数，2026-10-30 用户裁决）
     for bad in ('预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱'):
         assert bad not in para, bad                        # 禁用词（封闭表暂内联，W4 迁 verify）
 
@@ -437,12 +437,12 @@ def test_weekly_narrative_render():
     out = wn.render(_facts(trough13_est=True))
     assert '国庆假期那周只签了 2,098 套（含估算）——假期签约少是每年惯例' in out
 
-    # ③ N=1 带值 / 互现：结论句带数字；锚句移至 S2 尾
+    # ③ N=1 带值 / 互现：结论句带幅度与数字；锚句移至 S2 尾
     out = wn.render(_facts(streak_weeks=1, last_pair_reversal=False))
-    assert '**节后最近一周回升，成交 3,760 套' in out and '_s3absent' == '_s3absent'
+    assert '**节后最近一周回升 7.4%，成交 3,760 套' in out
     assert '从 3,502 套' not in out                         # 无 S3
     out = wn.render(_facts(streak_weeks=1, last_pair_reversal=True))
-    assert '**节后近几周有涨有跌，最近一周回升，成交 3,760 套' in out
+    assert '**节后近几周有涨有跌，最近一周回升 7.4%，成交 3,760 套' in out
 
     # ④ null 四句式 + 同周谷值简化（holiday_last 场景末完整周=假期周，场景须自洽）
     out = wn.render(_facts(direction=None, null_reason='holiday_last',
@@ -458,11 +458,11 @@ def test_weekly_narrative_render():
     out = wn.render(_facts(direction=None, null_reason='gap'))
     assert '**此前一周数据缺失，暂无可比走势' in out
 
-    # ⑤ 水位短语三档 + 退化档；节假日不触发负例
-    out = wn.render(_facts(level='above'))
-    assert '高于最近半年的周均水平' in out and '转冷' in out      # 谷值仍是节假日周（场景设定）
+    # ⑤ 水位短语三档（带幅度） + 退化档；节假日不触发负例
+    out = wn.render(_facts(level='above', level_gap_pct=9.9))
+    assert '比最近半年的周均高 9.9%' in out and '转冷' in out    # 谷值仍是节假日周（场景设定）
     out = wn.render(_facts(level='parity', avg26_weeks=20))
-    assert '与有数据以来的周均水平大体相当' in out
+    assert '与有数据以来的周均大体相当' in out
     out = wn.render(_facts(trough13_holiday=False))
     assert '假期' not in out.split('。')[1] if '。' in out else True
     assert '见到近期低点（2,098 套）' in out
