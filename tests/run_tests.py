@@ -202,6 +202,7 @@ def test_weekly_facts_direction():
     f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
                                               [3000, 3100, 3200, 4000, 3900, 3800, 3700, 3600]))
     assert f['direction'] == 'down' and f['streak_weeks'] == 4
+    assert f['streak_change_pct'] == -10.0    # facts 侧保持带符号（渲染层才取 abs，架构评审 F2 守卫）
 
     # ④ 持平中断 → null/tie
     f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-06-02', 8),
@@ -433,8 +434,9 @@ def test_weekly_narrative_render():
     assert para.count('当周）') == 1                       # 日期码全段唯一
     nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+|\d+(?:\.\d+)?%', para)
     assert len(nums) <= 8, nums                            # 数字预算（含量化百分数，2026-10-30 用户裁决）
-    for bad in ('预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱'):
-        assert bad not in para, bad                        # 禁用词（封闭表暂内联，W4 迁 verify）
+    from analysis import verify
+    for bad in verify.WK_BANNED_WORDS:
+        assert bad not in para, bad                        # 禁用词封闭表（单一来源 verify，QA 评审 #8 收敛）
 
     # ② est×节假日叠加（谷值含估算）：节日名在前、天数括注随后
     out = wn.render(_facts(trough13_est=True, trough13_est_days=1))

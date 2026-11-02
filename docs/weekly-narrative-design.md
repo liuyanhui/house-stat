@@ -109,7 +109,7 @@ lagged      ：days < 7 且 前一周也 days<7 且前一周非节假日周（�
   2. 降级一致性：独立数 n_full<8 ↔ json narrative=false（且其余字段全 null）↔ md 界定符 0 个；narrative=true ↔ 界定符恰 2 个（`md.count('<!-- wk-narrative -->') == 2`，取首对之间为段；1/3/4 个均 issue）。
   3. 事实直比：逐字段（int/str/bool/枚举精确等；**float：未 round 重算值对 json round1 值，`abs>0.1` 才 issue**，含等号）。
   4. 段内锚点（条件化，防 mixed 假失败）：`direction ∈ {up,down}` → `f'{last_full_units:,}'` 须在段内；peak13/trough13_units 非 null → 其千分位须在段内。
-  5. 措辞门：段内 WK_BANNED_WORDS 扫描 + 预算计数（`\d{1,3}(?:,\d{3})+` 与 `日均\s\d+`，≤6）。
+  5. 措辞门：段内 WK_BANNED_WORDS 扫描 + 预算计数（`\d{1,3}(?:,\d{3})+`、`日均\s\d+` 与 `\d+(?:\.\d+)?%` 百分数计入，≤8——v1.3 用户裁决，三处口径同步 2026-11-02 QA 评审 #6）。
 
 ## 3. `report/wk_facts.json` schema（原生类型，NaN→None，allow_nan=False；文案不进）
 
@@ -149,8 +149,8 @@ fixture 构造器：`_mk_daily(start, weeks, units_pattern, ...)` → 日度 Dat
 | test_weekly_facts_level | ±5% 三档；基准剔除近 4 周（构造重叠场景验证不恒 parity）；<26 措辞退化；基准 <13 → null |
 | test_weekly_facts_last_week | complete/in_progress/lagged 三态（滞后=前一周也缺天且非节假日）；同期对齐数值（手工构造周二三位置）；上周同位置缺天→ok=false；P 非连续→contiguous=false；days<3；ip_* 等于 daily 末周子集 |
 | test_weekly_facts_degrade | 7 完整周 narrative=false 且其余字段 null；恰好 8/13/26 等值边界 |
-| test_weekly_narrative_render | S1 五变体（N≥2/N=1 带值/互现/null 三句式含 trough 同周简化）；节假日谷→节日名+惯例句（**含 est×节假日叠加**：两句式并存顺序）；est 峰→（含估算）+段末注；**节假日周不触发负例**（无解释句）；**lagged 变体**；日期码唯一次（末周值后）；预算 ≤6（正则计数，含满配场景+裁剪顺序）；界定符成对；水位三档短语与退化档 |
-| test_verify_weekly_gate | 交叉验证：同一合成 CSV → metrics 链 vs `_wk_facts_from_csv` 逐字段相等；篡改 json→fail；narrative=false 与界定符不一致→fail；daily 非空缺 json→fail；段内禁用词→fail；预算超 6→fail；既有 test_verify_gate* fixture 补 wk_facts.json 后全绿 |
+| test_weekly_narrative_render | S1 五变体（N≥2/N=1 带值/互现/null 三句式含 trough 同周简化）；节假日谷→节日名+惯例句（**含 est×节假日叠加**：两句式并存顺序）；est 峰→（含估算）+段末注；**节假日周不触发负例**（无解释句）；**lagged 变体**；日期码唯一次（末周值后）；预算 ≤8（正则计数含百分数，含满配场景）；界定符成对；水位三档短语与退化档 |
+| test_verify_weekly_gate | 交叉验证：同一合成 CSV → metrics 链 vs `_wk_facts_from_csv` 逐字段相等；篡改 json→fail；narrative=false 与界定符不一致→fail；daily 非空缺 json→fail；段内禁用词→fail；预算超 8→fail；既有 test_verify_gate* fixture 补 wk_facts.json 后全绿 |
 
 ## 6. 实施顺序（每步全绿再进）
 
