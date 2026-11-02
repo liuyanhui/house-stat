@@ -242,7 +242,7 @@ def weekly_trend_facts(weekly, daily=None):
          'post_holiday': False,
          'chain_first_week': None, 'chain_first_units': None,
          'anchor_kind': 'none', 'anchor_week': None,
-         'avg4': None, 'avg26': None, 'avg26_weeks': 0,
+         'avg4': None, 'avg4_holiday_week': None, 'avg26': None, 'avg26_weeks': 0,
          'level': None, 'level_gap_pct': None,
          'peak13_week': None, 'peak13_units': None, 'peak13_est': None,
          'peak13_est_days': None, 'peak13_holiday': None,
@@ -323,6 +323,9 @@ def weekly_trend_facts(weekly, daily=None):
             raw4 = float(fw['套数'].tail(4).mean())
             base = fw.iloc[:-4].tail(26)
             f['avg4'] = round(raw4, 1)
+            hol4 = [str(r['week_start'].date()) for _, r in fw.tail(4).iterrows()
+                    if hol(r['week_start'])]
+            f['avg4_holiday_week'] = hol4[-1] if hol4 else None  # 水位句"（含X周）"加注（v1.6 F1）
             f['avg26_weeks'] = int(len(base))
             if not base.empty:
                 raw26 = float(base['套数'].mean())

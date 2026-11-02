@@ -53,15 +53,21 @@ def _date_code(week_str):
 
 def _level_phrase(f):
     """水位短语——主语显式为'近 4 周的周均'（话术评审：隐藏主语会被读成当前周，
-    3,760 对半年均实为高 6.4%，'低 17.9%'仅在周均主语下成立）。空串=无水位句。"""
+    3,760 对半年均实为高 6.4%，'低 17.9%'仅在周均主语下成立）。空串=无水位句。
+    avg4 含节假日周时句末加注（v1.6 评审 F1 方案 A）：读数构成偏倚显式化，
+    防下周假期周轮出 avg4 后水位翻档被读作回归；parity 非方向断言，不加注。"""
     if f.get('level') is None:
         return ''
     base = '此前半年' if f['avg26_weeks'] >= 26 else '有数据以来'
     gap = f.get('level_gap_pct')
+    note = ''
+    hw = f.get('avg4_holiday_week')
+    if hw:
+        note = f'（含{_festival(hw) or "节假日"}周）'
     if f['level'] == 'above':
-        return f'；近 4 周的周均比{base}高 {gap}%'
+        return f'；近 4 周的周均比{base}高 {gap}%{note}'
     if f['level'] == 'below':
-        return f'；近 4 周的周均仍比{base}低 {abs(gap)}%'
+        return f'；近 4 周的周均仍比{base}低 {abs(gap)}%{note}'
     return f'；近 4 周的周均与{base}大体相当'
 
 

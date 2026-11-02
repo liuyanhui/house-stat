@@ -17,6 +17,7 @@ analyze.py 在 render 之后、开浏览器之前调用；失败由调用方把 
 """
 import csv
 import json
+import math
 import os
 import re
 import sys
@@ -38,7 +39,8 @@ _WK_FIELDS = ['narrative', 'n_full_weeks', 'last_week_state', 'last_full_week',
               'last_full_units', 'direction', 'null_reason', 'streak_weeks',
               'streak_change_pct', 'last_pair_reversal', 'streak_contains_est',
               'post_holiday', 'chain_first_week', 'chain_first_units',
-              'anchor_kind', 'anchor_week', 'avg4', 'avg26', 'avg26_weeks',
+              'anchor_kind', 'anchor_week', 'avg4', 'avg4_holiday_week',
+              'avg26', 'avg26_weeks',
               'level', 'level_gap_pct', 'peak13_week', 'peak13_units',
               'peak13_est', 'peak13_est_days', 'peak13_holiday', 'trough13_week',
               'trough13_units', 'trough13_est', 'trough13_est_days',
@@ -214,6 +216,8 @@ def _wk_facts_from_csv(data_dir, estimated_dates=None):
             raw4 = sum(t[1] for t in fw[-4:]) / 4
             base = fw[:-4][-26:]
             f['avg4'] = raw4
+            hol4 = [t[0].isoformat() for t in fw[-4:] if hol(t[0])]
+            f['avg4_holiday_week'] = hol4[-1] if hol4 else None
             f['avg26_weeks'] = len(base)
             if base:
                 raw26 = sum(t[1] for t in base) / len(base)
@@ -467,11 +471,21 @@ def check(report_dir, data_dir, no_js=False):
         if wk is not None:
             for k in _WK_FIELDS:
                 a, b = wk.get(k), re_f.get(k)
-                if isinstance(b, float):
-                    if a is None or abs(float(a) - b) > 0.1:
-                        issues.append(f'wk_facts.{k} 不符: json={a} != 重算={round(b, 3)}')
-                elif a != b:
-                    issues.append(f'wk_facts.{k} 不符: json={a} != 重算={b}')
+                try:
+                    if isinstance(b, float):
+                        # QA 评审 #2/#3：NaN 字面量 abs(NaN−b)>0.1 恒 False 会静默过门、
+                        # bool 与 int 同值（1==True）会过门——显式排除并同型直比
+                        if (a is None or isinstance(a, bool)
+                                or not isinstance(a, (int, float))
+                                or math.isnan(float(a))
+                                or abs(float(a) - b) > 0.1):
+                            issues.append(f'wk_facts.{k} 不符: json={a} != 重算={round(b, 3)}')
+                    elif type(a) is not type(b) or a != b:
+                        issues.append(f'wk_facts.{k} 不符: json={a} != 重算={b}'
+                                      f'（类型 {type(a).__name__}/{type(b).__name__}）')
+                except (TypeError, ValueError) as e:
+                    # 架构评审 F4：脏 json 报 issue 而非 traceback（保持 fail-closed 风格）
+                    issues.append(f'wk_facts.{k} 值异常: json={a} ({e})')
             if os.path.isfile(md_path):
                 n_delim = md.count('<!-- wk-narrative -->')
                 if wk.get('narrative') and n_delim != 2:

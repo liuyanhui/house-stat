@@ -216,6 +216,7 @@ def test_weekly_facts_direction():
     assert f['direction'] == 'up' and f['streak_weeks'] == 1
     assert f['post_holiday'] is True
     assert f['last_pair_reversal'] is False     # 10-06 假期周 → 再前一对不可比
+    assert f['avg4_holiday_week'] == '2025-10-06'  # 近 4 周（09-29~10-20）含两假期周，取最近（v1.6 F1）
 
     # ⑥ 末完整周本身是假期周 → holiday_last
     f = metrics.weekly_trend_facts(_mk_weekly(_mondays('2025-08-04', 10),
@@ -433,7 +434,7 @@ def test_weekly_narrative_render():
     assert '含 1 个估算周，估算日清单见"数据说明"' in para
     assert para.count('当周）') == 1                       # 日期码全段唯一
     nums = re.findall(r'\d{1,3}(?:,\d{3})+|日均 \d+|\d+(?:\.\d+)?%', para)
-    assert len(nums) <= 8, nums                            # 数字预算（含量化百分数，2026-10-30 用户裁决）
+    assert len(nums) == 8, nums  # 预算=结构上限恰 8 不变量（S1≤2+S2≤2+S3≤2+S4≤2；评审 F5：新增带数字句式即触顶）
     from analysis import verify
     for bad in verify.WK_BANNED_WORDS:
         assert bad not in para, bad                        # 禁用词封闭表（单一来源 verify，QA 评审 #8 收敛）
@@ -456,6 +457,14 @@ def test_weekly_narrative_render():
                            streak_change_pct=-0.7))
     assert '比上一完整周回落 0.7%（单周幅度，属正常波动）' in out
     assert '回落 -' not in out
+
+    # ③c 水位句构成加注（v1.6 F1 方案 A）：avg4 含节假日周 → above/below 句末"（含国庆周）"；
+    # parity 非方向断言不加注
+    out = wn.render(_facts(avg4_holiday_week='2026-10-05'))
+    assert '低 13.2%（含国庆周）' in out
+    out = wn.render(_facts(level='parity', level_gap_pct=2.0,
+                           avg4_holiday_week='2026-10-05'))
+    assert '（含国庆周）' not in out and '大体相当' in out
 
     # ④ null 四句式 + 同周谷值简化（holiday_last 场景末完整周=假期周，场景须自洽）
     out = wn.render(_facts(direction=None, null_reason='holiday_last',
@@ -536,6 +545,53 @@ def test_verify_weekly_gate():
             else:
                 assert a == b, (k, a, b)
 
+    # ①b 分支参数化交叉验证（评审 F4=QA1）：tie / gap / holiday_last / lagged / 降级——
+    # 双实现等价不再只押单一 up 场景；holiday_last 场景顺带交叉验证 avg4_holiday_week
+    def _rows_full(start, week_idx, day_u=100):
+        w = pd.Timestamp(start) + pd.Timedelta(days=7 * week_idx)
+        return [((w + pd.Timedelta(days=i)).strftime('%Y-%m-%d'), day_u)
+                for i in range(7)]
+
+    scenarios = []
+    rows = sum((_rows_full('2025-06-02', w, 100 + w * 5) for w in range(7)), [])
+    rows += _rows_full('2025-06-02', 7, 130)     # w7 与 w6 同值 → tie
+    scenarios.append(('tie', rows))
+    rows = sum((_rows_full('2025-06-02', w, 100 + w * 5) for w in range(7)), [])
+    rows += _rows_full('2025-06-02', 8, 140)    # 缺 07-21 整周 → 末对（07-14→07-28）紧邻洞
+    scenarios.append(('gap', rows))              # 设计：缺口须紧邻末周才 null（否则链照常）
+    rows = sum((_rows_full('2025-08-04', w, 100 + w * 5) for w in range(10)), [])
+    scenarios.append(('holiday_last', rows))     # 末整周=2025-10-06（国庆）
+    rows = sum((_rows_full('2025-06-02', w, 100 + w * 5) for w in range(8)), [])
+    rows += [((pd.Timestamp('2025-06-02') + pd.Timedelta(days=7 * 8 + i)).strftime('%Y-%m-%d'), 60)
+             for i in (2, 3, 4)]                 # 前一周仅 3 天（非假期）
+    rows += [((pd.Timestamp('2025-06-02') + pd.Timedelta(days=7 * 9 + i)).strftime('%Y-%m-%d'), 60)
+             for i in (0, 1)]                    # 末周仅 2 天 → lagged
+    scenarios.append(('lagged', rows))
+    rows = sum((_rows_full('2025-06-02', w, 100 + w * 5) for w in range(7)), [])
+    scenarios.append(('narrative=false', rows))  # 7 整周 <8 → 字段最小化
+    expect = {'tie': ('null_reason', 'tie'), 'gap': ('null_reason', 'gap'),
+              'holiday_last': ('null_reason', 'holiday_last'),
+              'lagged': ('last_week_state', 'lagged')}
+    for tag, rows in scenarios:
+        s = _daily_with_holes(rows)
+        a_f = metrics.weekly_trend_facts(metrics.weekly_aggregate(s), daily=s)
+        if tag in expect:
+            k, v = expect[tag]
+            assert a_f[k] == v, (tag, k, a_f[k])
+        if tag == 'narrative=false':
+            assert a_f['narrative'] is False and a_f['direction'] is None
+        with tempfile.TemporaryDirectory() as tmp:
+            s.to_csv(os.path.join(tmp, 'resale_daily.csv'), index=False,
+                     encoding='utf-8-sig')
+            b_f = verify._wk_facts_from_csv(tmp)
+            assert set(a_f) == set(b_f) == set(verify._WK_FIELDS), tag
+            for k in b_f:
+                a, b = a_f[k], b_f[k]
+                if isinstance(b, float):
+                    assert a is not None and abs(a - b) <= 0.1, (tag, k, a, b)
+                else:
+                    assert a == b, (tag, k, a, b)
+
     # ② 门：全套产物齐 → 过；逐类注错 → 各自触发
     def build(rep, data, facts, md_text):
         _write_chart_stubs(rep)
@@ -595,6 +651,21 @@ def test_verify_weekly_gate():
                     '2026-09,2,2,12345,2\n')
         ok, issues = verify.check(rep, data)
         assert any('残留' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        # QA 评审 #2：NaN 字面量（json.loads 默认接受）须报 issue 而非静默过门
+        import re
+        build(rep, data, f1, base_md)
+        p = os.path.join(rep, 'wk_facts.json')
+        raw = open(p, encoding='utf-8').read()
+        raw = re.sub(r'"avg4": [^,}]+', '"avg4": NaN', raw, count=1)
+        open(p, 'w', encoding='utf-8').write(raw)
+        ok, issues = verify.check(rep, data)
+        assert any('wk_facts.avg4' in i for i in issues)
+    with tempfile.TemporaryDirectory() as rep, tempfile.TemporaryDirectory() as data:
+        # QA 评审 #3：bool 字段写成 int（1==True 同值过门）须报 issue
+        build(rep, data, dict(f1, last_pair_reversal=int(f1['last_pair_reversal'])), base_md)
+        ok, issues = verify.check(rep, data)
+        assert any('wk_facts.last_pair_reversal' in i for i in issues)
 
     # ③ narrative=false × 界定符并存（7 完整周小数据集 + 手放界定符）
     small_rows = [( (pd.Timestamp('2025-06-02') + pd.Timedelta(days=k)).strftime('%Y-%m-%d'),
@@ -623,6 +694,19 @@ def test_expand_estimated_days():
     from analysis import metrics
     days = metrics.expand_estimated_days({'2026-07-25/26': 'x', '2026-09-16': 'y'})
     assert days == ['2026-07-25', '2026-07-26', '2026-09-16']
+
+
+def test_est_registry_format():
+    """评审 F2（架构）：ESTIMATED_DAYS 默认注册表展开守卫——双实现共享的唯一盲区，
+    键格式漂移（如写成 '2026-07-25~26' 连字符简写）会两侧同错且交叉验证照过。"""
+    import re
+    from datetime import datetime
+    from analysis import metrics
+    days = metrics.expand_estimated_days()
+    assert days, 'ESTIMATED_DAYS 展开为空（注册表被清空或解析失败？）'
+    for d in days:
+        assert re.fullmatch(r'\d{4}-\d{2}-\d{2}', d), d
+        datetime.strptime(d, '%Y-%m-%d')
 
 
 def test_charts_engine_bars_lines():
