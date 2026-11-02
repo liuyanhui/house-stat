@@ -88,6 +88,9 @@ img {{ max-width:100%; height:auto; display:block; margin:1.2em auto;
   border:1px solid var(--border); border-radius:6px; }}
 /* 表格：表头强调色浅底、斑马纹、横向滚动 */
 .table-wrap {{ overflow-x:auto; margin:1.2em 0; }}
+.table-wrap td[data-v]:not(:first-child) {{ text-align:right; font-variant-numeric:tabular-nums; }}
+.table-wrap .arr-up {{ color:#c0392b; }}   /* ▲ 红涨（A股惯例，箭头形状已表方向，色为强化） */
+.table-wrap .arr-down {{ color:#1e8449; }} /* ▼ 绿跌 */
 table {{ border-collapse:collapse; width:100%; font-size:14px; }}
 th,td {{ border:1px solid var(--border); padding:7px 11px; text-align:left;
   white-space:nowrap; }}
@@ -211,7 +214,7 @@ def _cell_key(text):
     支持本项目格式：千分位/百分号/pp/⚠️ 后缀、+/- 前缀、'YYYY-MM[-DD]' 日期、
     '—'/'N/A' → None（排序置尾）。解析不了（如区县名、区间段）→ None。
     """
-    s = str(text).strip()
+    s = str(text).strip().replace('▲', '+').replace('▼', '-')  # 箭头带符号语义（防 ▼0.5% 排序成正数）
     for ch in (',', '%', 'pp', '⚠️', '↑', '↓', ' '):
         s = s.replace(ch, '')
     if s in ('', '—', '-', 'N/A', 'None', '…'):
@@ -281,6 +284,9 @@ def _table_html(buf):
             if k is not None:
                 attr = f' data-v="{_fmt_key(k)}"'
                 keyed = True
+            if '▲' in cell or '▼' in cell:   # 方向箭头着色（红涨绿跌；data-v 已先算，不受污染）
+                cell = (cell.replace('▲', '<span class="arr-up">▲</span>')
+                            .replace('▼', '<span class="arr-down">▼</span>'))
             out.append(f'<td{attr}>{cell}</td>')
         out.append('</tr>')
     out.append('</tbody></table></div>')

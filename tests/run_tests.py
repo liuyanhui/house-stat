@@ -689,6 +689,26 @@ def test_sanitize_bad_values():
     assert s['网上签约面积(m2)'].notna().sum() == len(s) - 1
 
 
+def test_monthly_table_arrow_ui():
+    """UI 批（2026-11-02 用户验收）：月度表环比/同比 ▲/▼ 箭头——红涨绿跌着色、
+    data-v 排序键不受箭头污染、数字列右对齐 CSS；"—"（无同比）裸格不套箭头。"""
+    import os
+    from analysis import html_render as hr
+    md = ('| 年月 | 环比 | 同比 |\n| --- | --- | --- |\n'
+          '| 2026-09 | ▲13.7% | ▼0.5% |\n| 2025-12 | ▲19.1% | — |\n')
+    with tempfile.TemporaryDirectory() as tmp:
+        vendor = os.path.join(tmp, 'v.js')
+        with open(vendor, 'w', encoding='utf-8') as f:
+            f.write('/*v*/')
+        html = hr.md_to_html(md, image_dir=tmp, charts_dir=os.path.join(tmp, 'charts'),
+                             vendor_path=vendor, no_js=True)
+    assert '<span class="arr-up">▲</span>13.7%' in html
+    assert '<span class="arr-down">▼</span>0.5%' in html
+    assert '<td>—</td>' in html                   # 无同比裸格
+    assert 'data-v="13.7"' in html and 'data-v="-0.5"' in html  # 箭头不污染排序键
+    assert 'td[data-v]:not(:first-child)' in html  # 数字列右对齐 + 等宽数字
+
+
 def test_expand_estimated_days():
     """T1.3：'25/26' 简写展开为具体日期。"""
     from analysis import metrics

@@ -31,7 +31,7 @@
 - 迁移期像素比对工具：`tests/pixel_diff.py`（超容差→人工复核记录）。
 
 ### `report.py`
-组装 `report/trend_report.md`：摘要 / 全市 / 周度 / 区域 / 市场结构 / 数据说明。图表经 `charts.prep_*` + `write_chart` 产出；`<!-- toc -->` 占位（html_render 渲染目录）。媒体 H1 参考表已移除（根 CLAUDE.md 约定 12）。**仅生成 md，不耦合 html**——HTML 由 html_render 从成品 md 转换。周度节含叙述段（W3）：图注后、近 10 周表前插 `weekly_narrative.render(wk_facts)`（取代原 wk_note）；`wk_facts.json` 与叙述段同次落盘（daily 空 → 删遗留）。
+组装 `report/trend_report.md`：摘要 / 全市 / 周度 / 区域 / 市场结构 / 数据说明。图表经 `charts.prep_*` + `write_chart` 产出；`<!-- toc -->` 占位（html_render 渲染目录）。媒体 H1 参考表已移除（根 CLAUDE.md 约定 12）。**仅生成 md，不耦合 html**——HTML 由 html_render 从成品 md 转换。周度节含叙述段（W3）：图注后、近 10 周表前插 `weekly_narrative.render(wk_facts)`（取代原 wk_note）；`wk_facts.json` 与叙述段同次落盘（daily 空 → 删遗留）。月度明细表环比/同比列用 ▲/▼ 箭头替代正负号（红涨绿跌着色在 html_render 层），表下"—＝无同比"脚注。
 
 ### `html_render.py`
 Markdown→自包含 HTML 转换器（零第三方依赖，stdlib only）。

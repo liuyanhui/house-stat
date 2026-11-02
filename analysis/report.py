@@ -26,6 +26,17 @@ def _pct(v):
     return f'{v:+.1f}%'
 
 
+def _pct_arrow(v):
+    """表格专用：方向箭头替代正负号（▲涨/▼跌，形状即方向；红/绿着色在 html_render）。"""
+    if pd.isna(v):
+        return '—'
+    if v > 0:
+        return f'▲{v:.1f}%'
+    if v < 0:
+        return f'▼{abs(v):.1f}%'
+    return '0.0%'
+
+
 def _table(headers, rows):
     line1 = '| ' + ' | '.join(headers) + ' |'
     line2 = '| ' + ' | '.join(['---'] * len(headers)) + ' |'
@@ -207,10 +218,11 @@ def generate():
     rows = []
     for _, r in monthly_yoy.iloc[::-1].iterrows():
         rows.append([str(r['period']), f"{int(r['住宅签约套数']):,}",
-                     _pct(r['环比']), _pct(r['同比']),
+                     _pct_arrow(r['环比']), _pct_arrow(r['同比']),
                      f"{r['住宅签约面积(m2)']:,.0f}",
                      f"{r['住宅签约面积(m2)']/r['住宅签约套数']:.1f}" if r['住宅签约套数'] else '—'])
     md.append(_table(['年月', '住宅网签(套)', '环比', '同比', '住宅面积(m²)', '套均(m²)'], rows))
+    md.append('*注："—"＝无同比（同比需连续 13 个月数据，序列自 2025-01 起，2025 年内月份无上年基准）。*')
     md.append('')
 
     # R5 累计与非住宅结构（T2.6）
