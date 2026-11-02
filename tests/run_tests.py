@@ -449,6 +449,12 @@ def test_weekly_narrative_render():
     out = wn.render(_facts(streak_weeks=1, last_pair_reversal=True))
     assert '**节后近几周有涨有跌，最近一周（10 月 19–25 日当周）成交 3,760 套' in out
 
+    # ③b 下行幅度取绝对值：动词已表方向，负号不重复（v1.5，W5 通读裁决）
+    out = wn.render(_facts(direction='down', streak_weeks=1, last_pair_reversal=True,
+                           streak_change_pct=-0.7))
+    assert '比上一完整周回落 0.7%（单周幅度，属正常波动）' in out
+    assert '回落 -' not in out
+
     # ④ null 四句式 + 同周谷值简化（holiday_last 场景末完整周=假期周，场景须自洽）
     out = wn.render(_facts(direction=None, null_reason='holiday_last',
                            last_full_week='2026-09-28'))

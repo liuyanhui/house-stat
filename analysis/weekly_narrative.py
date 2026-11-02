@@ -94,6 +94,8 @@ def _s1(f):
     verb = '回升' if f['direction'] == 'up' else '回落'
     post = '节后' if f['post_holiday'] else ''
     pct = f.get('streak_change_pct')
+    if pct is not None:
+        pct = abs(pct)  # 方向由动词表达，幅度取绝对值——防"回落 -0.7%"语义重复（facts 保持带符号）
     if f['streak_weeks'] >= 2:
         return f'**{post}成交连续 {f["streak_weeks"]} 周{verb}，累计 {pct}%{lvl}。**'
     est = '（含估算）' if f['streak_contains_est'] else ''
