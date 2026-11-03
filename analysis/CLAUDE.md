@@ -16,6 +16,7 @@
 - 口径防护（M1）：`add_yoy_mom`（断档环比 NaN；同比需连续段 ≥13 月）、`sanitize_bad_values`（2025-01 面积坏值→NaN，供整窗规则）、`weekly_aggregate`（`_week_bucket` 共用周口径；`est_days`/`MA4含估算` 估算标记随聚合传播）、`expand_estimated_days`。
 - 累计与结构（M2）：`add_ttm`（12 月连续+值全有效才出值）、`add_ytd`（等窗，年内缺月/NaN 前缀污染整段无效）、`nonresidential_share`（'总>住宅'守卫）。
 - 新房与机构（M3）：`new_home_weekly`（认购/签约=期房+现房住宅）、`new_inventory`（库存快照）、`district_mom`（区县月度环比，首月无值+断档防护）、`agency_refund`（当月+3月滚动均 Σ/Σ，断档整窗空）、`agency_top`（上榜内份额）、`annual_anchor`（官方年度+满 12 月年份月度和）。
+- 图表叙述事实（cn，设计 v1.1b）：`district_mom_facts`/`area_share_facts`/`refund_rate_facts` + 入口 `chart_facts(stem, …)`——**不复用 prep 中间层**（防检查 12 自检）；领涨/领跌门槛=上月 ≥500 套、pct==0 计持平、n_districts 断言 ==17 fail-closed；份额分母=当月段和、触发判定 top_trigger 内聚；refund prev=紧邻月断档即跳、滚动取末两有效点。narrative=false 字段最小化（仅 narrative/last_month）。
 - 周度叙述事实（W，设计 v1.4）：`weekly_trend_facts(weekly, daily)`——方向链（N=链长−1、节假日/持平/缺口中断、估算不中断、null 四成因）、水位（基准=剔近 4 周的 ≤26 周均、±5% 死区）、13 周峰谷（tie-break 非节假日优先）、末周三态（complete/in_progress/lagged，纯数据锚无时钟）、进行中周同期对齐、narrative 门（完整周 <8 字段最小化）。**纯 dict 不含文案**；verify 侧另有一套 CSV 独立重算，两边规则须逐字对齐（改任一侧先同步设计文档）。节假日周=`chinese_calendar` 周内工作日净额 ≤3。
 - 其余：`add_moving_avg`、`avg_unit_area`、`district_share`/`district_rank_change`、`segment_share`、`coverage_counts`。
 

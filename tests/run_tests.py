@@ -689,6 +689,123 @@ def test_sanitize_bad_values():
     assert s['网上签约面积(m2)'].notna().sum() == len(s) - 1
 
 
+def test_chart_facts_district():
+    """C1：district_mom facts——≥500 门槛（小区大涨不参评）/持平计数/全市行过滤/
+    tie-break/断档整列 NaN/单月最小化/区县数≠17 fail-closed。"""
+    import pandas as pd
+    from analysis import metrics
+    names = ['东城', '西城', '朝阳', '海淀', '丰台', '石景山', '门头沟', '房山',
+             '通州', '顺义', '昌平', '大兴', '怀柔', '平谷', '密云', '延庆', '开发区']
+
+    def frame(months_units):
+        rows = [(p, n, u) for p, m in months_units.items() for n, u in m.items()]
+        return pd.DataFrame(rows, columns=['period', '区县_clean', '签约套数'])
+
+    m0 = dict(zip(names, [1000, 1000, 2000, 1800, 1200, 600, 300, 1000,
+                          1500, 1400, 1300, 1100, 150, 200, 250, 180, 220]))
+    m1 = dict(zip(names, [1500, 1100, 2200, 1900, 1200, 660, 330, 800,
+                          1600, 1500, 1200, 1150, 300, 100, 260, 190, 240]))
+    df = frame({pd.Period('2025-06', 'M'): m0, pd.Period('2025-07', 'M'): m1})
+    df = pd.concat([df, pd.DataFrame(                      # 全市行应被过滤
+        [(pd.Period('2025-06', 'M'), '全市', 9999), (pd.Period('2025-07', 'M'), '全市', 9999)],
+        columns=['period', '区县_clean', '签约套数'])], ignore_index=True)
+    f = metrics.district_mom_facts(df)
+    assert f['narrative'] is True and f['last_month'] == '25-07'
+    assert f['leader_name'] == '东城' and f['leader_pct'] == 50.0
+    assert f['leader_units'] == 1500
+    assert f['laggard_name'] == '房山' and f['laggard_pct'] == -20.0
+    assert f['laggard_units'] == 800                       # 怀柔 +100%/平谷 -50% 门槛外不参评
+    assert (f['n_up'], f['n_down'], f['n_flat']) == (13, 3, 1)
+    assert f['broad_up'] is False and f['broad_down'] is False
+
+    try:                                                   # 16 区 → fail-closed
+        metrics.district_mom_facts(frame({
+            pd.Period('2025-06', 'M'): dict.fromkeys(names[:16], 100),
+            pd.Period('2025-07', 'M'): dict.fromkeys(names[:16], 110)}))
+        assert False, '区县数≠17 应 raise'
+    except ValueError:
+        pass
+    f = metrics.district_mom_facts(frame({pd.Period('2025-06', 'M'): m0}))
+    assert f['narrative'] is False and f['last_month'] == '25-06'
+    assert f['leader_name'] is None and f['n_up'] is None  # 最小化仅剩 narrative/last_month
+    f = metrics.district_mom_facts(frame({pd.Period('2025-06', 'M'): m0,
+                                          pd.Period('2025-08', 'M'): m1}))
+    assert f['narrative'] is False                         # 断档（07 缺）→ 末列整列 NaN
+
+
+def test_chart_facts_area():
+    """C1：area_share facts——段和分母/上一可得月跳断档/原始差触发（top_trigger）/
+    ceil 摆事实上限/易主触发/单月最小化。"""
+    import pandas as pd
+    from analysis import metrics
+    SEGS = ['60m2以下', '60～80m2', '80～100m2', '100～120m2', '120～140m2', '140m2以上']
+
+    def frame(months_units):
+        rows = [(p, s, u) for p, m in months_units.items() for s, u in m.items()]
+        return pd.DataFrame(rows, columns=['period', '面积区间', '成交套数'])
+
+    m03 = dict(zip(SEGS, [620, 500, 400, 300, 200, 100]))     # 和 2120
+    m05 = dict(zip(SEGS, [700, 480, 390, 310, 210, 110]))     # 和 2200（04 缺席=断档跳过）
+    f = metrics.area_share_facts(frame({pd.Period('2026-03', 'M'): m03,
+                                        pd.Period('2026-05', 'M'): m05}))
+    assert f['narrative'] is True
+    assert f['last_month'] == '26-05' and f['prev_month'] == '26-03'
+    assert f['top_seg'] == '60m2以下'
+    assert f['top_share'] == 31.8 and f['prev_top_share'] == 29.2
+    assert f['top_delta_pp'] == 2.6 and f['top_trigger'] is True
+    assert f['top_changed'] is False
+    assert f['max_abs_delta_pp'] == 2.6                     # ceil 进位（raw≈2.573）
+
+    m06 = dict(zip(SEGS, [700, 710, 300, 200, 150, 100]))    # top=60～80m2
+    m07 = dict(zip(SEGS, [712, 703, 300, 200, 150, 100]))    # top=60m2以下，raw Δ≈0.48<0.5
+    f = metrics.area_share_facts(frame({pd.Period('2026-06', 'M'): m06,
+                                        pd.Period('2026-07', 'M'): m07}))
+    assert f['top_changed'] is True and f['top_trigger'] is True
+    assert f['top_delta_pp'] == 0.5                         # round1(0.48)=0.5——render 禁自判，facts 算死
+
+    f = metrics.area_share_facts(frame({pd.Period('2026-03', 'M'): m03}))
+    assert f['narrative'] is False and f['top_seg'] is None
+
+
+def test_chart_facts_refund():
+    """C1：refund facts——Σ/Σ 合并比/紧邻月 prev（断档跳环比）/滚动末两有效点
+    相邻判定/末月断档 narrative=false。"""
+    import pandas as pd
+    from analysis import metrics
+
+    def frame(months):
+        rows = []
+        for p, (s, r) in months.items():                    # 每月两家分摊使 groupby 生效
+            rows += [(p, s // 2, r // 2), (p, s - s // 2, r - r // 2)]
+        return pd.DataFrame(rows, columns=['period', '签约套数', '退房套数'])
+
+    months = {pd.Period(p, 'M'): (s, r) for p, s, r in [
+        ('2025-12', 1200, 24), ('2026-01', 1300, 38), ('2026-02', 1400, 33),
+        ('2026-03', 1500, 32), ('2026-04', 1600, 34), ('2026-07', 1700, 43),
+        ('2026-08', 1800, 35), ('2026-09', 1900, 33)]}      # 05/06 断档
+    f = metrics.refund_rate_facts(frame(months))
+    assert f['narrative'] is True and f['last_month'] == '26-09'
+    assert f['cur_rate'] == round(33 / 1900 * 100, 2)
+    assert f['prev_rate'] == round(35 / 1800 * 100, 2)
+    assert f['delta_pp'] == round((33 / 1900 - 35 / 1800) * 100, 2)
+    assert f['roll_last'] == round((43 + 35 + 33) / (1700 + 1800 + 1900) * 100, 2)
+    assert f['roll_prev'] == round((33 + 32 + 34) / (1400 + 1500 + 1600) * 100, 2)
+    assert f['roll_months_adjacent'] is False               # 末两有效滚动点=04 与 09
+
+    months2 = {pd.Period(p, 'M'): (s, r) for p, s, r in [
+        ('2026-01', 1200, 30), ('2026-02', 1300, 26), ('2026-03', 1400, 30),
+        ('2026-04', 1500, 33), ('2026-07', 1600, 40)]}      # 末月=07，紧邻 06 断档
+    f = metrics.refund_rate_facts(frame(months2))
+    assert f['cur_rate'] == round(40 / 1600 * 100, 2)
+    assert f['prev_rate'] is None and f['delta_pp'] is None  # 紧邻月断档 → 跳环比句
+    assert f['roll_months_adjacent'] is True                 # 末两有效滚动点=03/04 窗口
+    assert f['roll_last'] == round((26 + 30 + 33) / (1300 + 1400 + 1500) * 100, 2)
+
+    f = metrics.refund_rate_facts(frame({pd.Period('2026-01', 'M'): (1200, 30),
+                                         pd.Period('2026-02', 'M'): (0, 0)}))
+    assert f['narrative'] is False and f['cur_rate'] is None
+
+
 def test_monthly_table_arrow_ui():
     """UI 批（2026-11-02 用户验收）：月度表环比/同比 ▲/▼ 箭头——红涨绿跌着色、
     data-v 排序键不受箭头污染、数字列右对齐 CSS；"—"（无同比）裸格不套箭头。"""

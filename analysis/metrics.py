@@ -7,6 +7,8 @@
 import sys
 
 import chinese_calendar as cc
+import math
+
 import pandas as pd
 import numpy as np
 
@@ -548,3 +550,143 @@ def coverage_counts(monthly, district, area):
     return (len(monthly),
             district['period'].nunique() if not district.empty else 0,
             area['period'].nunique() if not area.empty else 0)
+
+
+# --- 图表叙述事实（chart-narrative 设计 v1.1b §2；不复用 prep 中间层，防检查 12 自检）---
+
+def _ym_code(period):
+    """Monthly Period → 'YY-MM'（图轴同款月份码，跨年无歧义）。"""
+    return str(period)[2:]
+
+
+def _cn_minimize(f):
+    """narrative=false 字段最小化（防 verify 直比歧义；保留 narrative/last_month）。"""
+    for k in f:
+        if k not in ('narrative', 'last_month'):
+            f[k] = None
+    return f
+
+
+def district_mom_facts(district):
+    """district_mom 叙述事实：领涨/领跌（上月 ≥500 套参评 + pct 同号 + 绝对量）、
+    涨/跌/平家数（pct==0 计持平）、broad ≥15/17；断档月整列 NaN；
+    n_districts 计长断言 ==17（fail-closed 于官方增区/改名）。"""
+    f = {'narrative': False, 'last_month': None, 'n_districts': None,
+         'leader_name': None, 'leader_pct': None, 'leader_units': None,
+         'laggard_name': None, 'laggard_pct': None, 'laggard_units': None,
+         'n_up': None, 'n_down': None, 'n_flat': None,
+         'broad_up': None, 'broad_down': None}
+    if district is None or district.empty:
+        return f
+    d = district[district['区县_clean'] != '全市']
+    wide = d.pivot_table(index='period', columns='区县_clean',
+                         values='签约套数', aggfunc='sum')
+    if wide.empty:
+        return f
+    if wide.shape[1] != 17:
+        raise ValueError(f'区县数 {wide.shape[1]}≠17（官方增区/改名？fail-closed）')
+    f['last_month'] = _ym_code(wide.index[-1])
+    mom = wide.pct_change() * 100
+    for i in range(1, len(wide)):                      # 断档防护：跨档整列 NaN
+        if (wide.index[i] - wide.index[i - 1]).n != 1:
+            mom.iloc[i] = np.nan
+    last_pct = mom.iloc[-1]
+    f['narrative'] = bool(len(wide) >= 2 and last_pct.notna().any())
+    if not f['narrative']:
+        return _cn_minimize(f)
+    prev_u, cur_u = wide.iloc[-2], wide.iloc[-1]
+    f['n_districts'] = 17
+    f['n_up'] = int((last_pct > 0).sum())
+    f['n_down'] = int((last_pct < 0).sum())
+    f['n_flat'] = int((last_pct == 0).sum())
+    f['broad_up'] = f['n_up'] >= 15
+    f['broad_down'] = f['n_down'] >= 15
+    elig = set(prev_u[prev_u >= 500].index)            # 门槛=上月套数 ≥500
+    ups = last_pct[last_pct.index.isin(elig) & (last_pct > 0)]
+    downs = last_pct[last_pct.index.isin(elig) & (last_pct < 0)]
+    if len(ups):                                       # 并列 tie-break：幅度→当月套数→名
+        n = sorted(ups.index, key=lambda x: (-ups[x], -cur_u[x], x))[0]
+        f['leader_name'], f['leader_pct'] = n, round(float(ups[n]), 1)
+        f['leader_units'] = int(cur_u[n])
+    if len(downs):
+        n = sorted(downs.index, key=lambda x: (downs[x], -cur_u[x], x))[0]
+        f['laggard_name'], f['laggard_pct'] = n, round(float(downs[n]), 1)
+        f['laggard_units'] = int(cur_u[n])
+    return f
+
+
+def area_share_facts(area):
+    """area_segment_share 叙述事实：份额=段/当月各段和（分母=段和，禁住宅口径）、
+    prev=上一可得月（数据无断档月行即天然跳过）、触发判定用未圆整原始差
+    （top_trigger 在 facts 内算死，防 render 拿 round1 值误判）、摆事实上限 ceil 进位。"""
+    f = {'narrative': False, 'last_month': None, 'prev_month': None,
+         'top_seg': None, 'top_share': None, 'prev_top_share': None,
+         'top_delta_pp': None, 'top_changed': None, 'top_trigger': None,
+         'max_abs_delta_pp': None}
+    if area is None or area.empty:
+        return f
+    wide = area.pivot_table(index='period', columns='面积区间',
+                            values='成交套数', aggfunc='sum')
+    if wide.empty:
+        return f
+    f['last_month'] = _ym_code(wide.index[-1])
+    f['narrative'] = len(wide) >= 2
+    if not f['narrative']:
+        return _cn_minimize(f)
+    share = wide.div(wide.sum(axis=1), axis=0) * 100
+    last_s, prev_s = share.iloc[-1], share.iloc[-2]
+    f['prev_month'] = _ym_code(wide.index[-2])
+    top = last_s.idxmax()
+    f['top_seg'] = str(top)
+    f['top_share'] = round(float(last_s[top]), 1)
+    f['prev_top_share'] = round(float(prev_s[top]), 1)
+    raw_delta = float(last_s[top] - prev_s[top])
+    f['top_delta_pp'] = round(raw_delta, 1)
+    f['top_changed'] = bool(prev_s.idxmax() != top)
+    f['top_trigger'] = bool(f['top_changed'] or abs(raw_delta) >= 0.5)
+    max_abs = float((last_s - prev_s).abs().max())
+    f['max_abs_delta_pp'] = math.ceil(round(max_abs * 10, 9)) / 10  # ceil 防假上限（1.42→1.5）
+    return f
+
+
+def refund_rate_facts(agency):
+    """refund_rate 叙述事实：Σ上榜退房/Σ上榜签约（月度与 3 月滚动均合并比）、
+    prev=x 轴紧邻月（断档即 None 跳环比句，禁"上一有值点"）、滚动取末两个有效点。"""
+    f = {'narrative': False, 'last_month': None, 'cur_rate': None,
+         'prev_rate': None, 'delta_pp': None,
+         'roll_last': None, 'roll_prev': None, 'roll_months_adjacent': None}
+    if agency is None or agency.empty:
+        return f
+    g = agency.groupby('period')[['签约套数', '退房套数']].sum()
+    g = g.reindex(pd.period_range(g.index.min(), g.index.max(), freq='M'))
+    f['last_month'] = _ym_code(g.index[-1])
+    rate = np.where(g['签约套数'] > 0, g['退房套数'] / g['签约套数'] * 100, np.nan)
+    cur = rate[-1]
+    if not np.isfinite(cur):
+        return f                                        # 末月断档 → narrative=false
+    f['narrative'] = True
+    f['cur_rate'] = round(float(cur), 2)
+    if len(rate) >= 2 and np.isfinite(rate[-2]):        # 紧邻月有值才有环比
+        f['prev_rate'] = round(float(rate[-2]), 2)
+        f['delta_pp'] = round(float(cur - rate[-2]), 2)
+    s3 = g[['签约套数', '退房套数']].rolling(3).sum()
+    roll = np.where(s3['签约套数'] > 0, s3['退房套数'] / s3['签约套数'] * 100, np.nan)
+    valid = [(i, roll[i]) for i in range(len(roll)) if np.isfinite(roll[i])]
+    if valid:
+        f['roll_last'] = round(float(valid[-1][1]), 2)
+        if len(valid) >= 2:
+            f['roll_prev'] = round(float(valid[-2][1]), 2)
+            f['roll_months_adjacent'] = bool(
+                (g.index[valid[-1][0]] - g.index[valid[-2][0]]).n == 1)
+    return f
+
+
+def chart_facts(stem, district=None, area=None, agency=None):
+    """图表叙述事实统一入口（设计 §1：chart_facts(stem, …DataFrame)）。"""
+    if stem == 'district_mom':
+        return district_mom_facts(district)
+    if stem == 'area_segment_share':
+        return area_share_facts(area)
+    if stem == 'refund_rate':
+        return refund_rate_facts(agency)
+    raise ValueError(f'未知 CN stem: {stem}')

@@ -34,6 +34,9 @@ HTML_SIZE_LIMIT = 2 * 1024 * 1024
 # 周度叙述禁用词封闭表（需求 v0.5 §2.2；单一来源，tests 从此导入，扫描仅限叙述段）
 WK_BANNED_WORDS = ['预计', '有望', '或将', '拐点', '动能', '窗口均值', '口径', '回暖', '走强', '走弱']
 
+# 图表叙述 stems（chart-narrative 设计 v1.1b §1；须为 CHART_STEMS 子集——tests 断言）
+CN_STEMS = ('district_mom', 'area_segment_share', 'refund_rate')
+
 # wk_facts.json 全字段（直比用；与 metrics.weekly_trend_facts 默认 dict 逐字对齐）
 _WK_FIELDS = ['narrative', 'n_full_weeks', 'last_week_state', 'last_full_week',
               'last_full_units', 'direction', 'null_reason', 'streak_weeks',
