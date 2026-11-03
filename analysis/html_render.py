@@ -89,6 +89,7 @@ img {{ max-width:100%; height:auto; display:block; margin:1.2em auto;
 /* 表格：表头强调色浅底、斑马纹、横向滚动 */
 .table-wrap {{ overflow-x:auto; margin:1.2em 0; }}
 .table-wrap td[data-v]:not(:first-child) {{ text-align:right; font-variant-numeric:tabular-nums; }}
+.table-wrap th:first-child, .table-wrap td:first-child[data-v] {{ width:1%; }}  /* 日期型首列塌缩至内容宽（用户验收 2026-11-03），富余让给数字列 */
 .table-wrap .arr-up {{ color:#c0392b; }}   /* ▲ 红涨（A股惯例，箭头形状已表方向，色为强化） */
 .table-wrap .arr-down {{ color:#1e8449; }} /* ▼ 绿跌 */
 table {{ border-collapse:collapse; width:100%; font-size:14px; }}
