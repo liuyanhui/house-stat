@@ -11,7 +11,7 @@ import numpy as np
 
 import config
 import quality
-from . import load, metrics, charts, weekly_narrative
+from . import load, metrics, charts, weekly_narrative, chart_narrative
 
 
 def _fmt(v, spec=',.0f'):
@@ -82,6 +82,15 @@ def generate():
     weekly = metrics.weekly_aggregate(daily) if not daily.empty else pd.DataFrame()
     # 周度叙述事实（W3）：与叙述段同次产出落 wk_facts.json，供 verify 独立重算直比
     wk_facts = metrics.weekly_trend_facts(weekly, daily) if not daily.empty else None
+
+    # 图表叙述事实（cn，C3）：三图各一份，同次产出落 cn_facts.json 供 verify 直比
+    cn_facts = {}
+    if not district.empty:
+        cn_facts['district_mom'] = metrics.district_mom_facts(district)
+    if not area.empty:
+        cn_facts['area_segment_share'] = metrics.area_share_facts(area)
+    if not agency.empty:
+        cn_facts['refund_rate'] = metrics.refund_rate_facts(agency)
 
     # 画图（charts 引擎：PNG 与 charts/<stem>.json 同 stem 成对产出，T1.4b）
     def _chart(spec):
@@ -173,6 +182,13 @@ def generate():
             json.dump(wk_facts, f, ensure_ascii=False, allow_nan=False)
     elif os.path.isfile(wk_facts_path):
         os.remove(wk_facts_path)
+    # cn_facts.json：三图全缺 → 删遗留（干净房间，同 wk 先例）
+    cn_facts_path = os.path.join(config.REPORT_DIR, 'cn_facts.json')
+    if cn_facts:
+        with open(cn_facts_path, 'w', encoding='utf-8') as f:
+            json.dump(cn_facts, f, ensure_ascii=False, allow_nan=False)
+    elif os.path.isfile(cn_facts_path):
+        os.remove(cn_facts_path)
 
     md = []
     md.append('# 北京二手住宅成交趋势报告\n')
@@ -314,6 +330,9 @@ def generate():
                   '超 ±50% 饱和进端档、格内数值为准；首月无环比）。'
                   '环比受季节性影响显著（春节 2→3 月普遍反弹，勿读作结构性回暖）。'
                   '区县数据为月度粒度——官方不发布区县×周数据，此为最细可用粒度。*\n')
+        _f = cn_facts.get('district_mom')
+        if _f and _f.get('narrative'):
+            md.append('\n' + chart_narrative.render('district_mom', _f) + '\n')
 
     # 市场结构
     md.append('\n## 五、市场结构\n')
@@ -326,6 +345,9 @@ def generate():
             md.append(f'![面积段占比]({imgs["area_sh"]})\n')
         md.append(f'\n*占比视角剥离总量波动（如 2 月春节全线塌量），更能看出结构迁移。'
                   f'当前 {n_area_months} 个月（2026-04 不可补、缺失），序列不连续。*\n')
+        _f = cn_facts.get('area_segment_share')
+        if _f and _f.get('narrative'):
+            md.append('\n' + chart_narrative.render('area_segment_share', _f) + '\n')
 
         # 各面积段 × 月份 占比表 + 占比变化(pp)；段序单一来源（charts.AREA_SEGMENTS）
         order = charts.AREA_SEGMENTS
@@ -395,6 +417,9 @@ def generate():
             md.append('\n*柱=当月退房率（Σ上榜退房/Σ上榜签约），红线=3 月滚动（窗口内 Σ/Σ'
                       ' 合并比，禁比率均值）；2026-05/06 断档月缺失、跨断档滚动窗口为空'
                       '（不插值）。退房是历史签约的回流，解读为"回流强度"而非当月成交质量。*\n')
+            _f = cn_facts.get('refund_rate')
+            if _f and _f.get('narrative'):
+                md.append('\n' + chart_narrative.render('refund_rate', _f) + '\n')
 
     # 数据说明 + 参考锚点
     md.append('\n## 八、数据说明\n')
