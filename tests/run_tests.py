@@ -806,6 +806,95 @@ def test_chart_facts_refund():
     assert f['narrative'] is False and f['cur_rate'] is None
 
 
+# 图表叙述预算计数正则（设计 §4.5；C5 迁 verify.CN_* 单一来源后改导入）
+_CN_BUDGET_RE_STR = (r'\d{1,3}(?:,\d{3})*(?= 套)|\d+(?:\.\d+)?(?= 个百分点)'
+                     r'|\d+(?:\.\d+)?%|(?<![\d.])\d{1,2}(?= 区)')
+
+
+def test_chart_narrative_render_district():
+    """C2：district render——满配恰 9/全跌句/仅领涨/broad 家数/持平省略/退化空串。"""
+    import re
+    from analysis import chart_narrative as cn
+    full = dict(narrative=True, last_month='26-09', n_districts=17,
+                leader_name='东城', leader_pct=32.8, leader_units=725,
+                laggard_name='房山', laggard_pct=-11.5, laggard_units=900,
+                n_up=5, n_down=11, n_flat=1, broad_up=False, broad_down=False)
+    out = cn.render('district_mom', full)
+    assert out.count('<!-- cn-district_mom -->') == 2
+    body = out.split('<!-- cn-district_mom -->')[1].strip()
+    assert body.count('\n') == 0                       # 整段一行
+    assert body == ('**东城领涨，环比 32.8%（当月 725 套）；房山领跌，环比 11.5%'
+                    '（当月 900 套）。**（均按上月签约 500 套以上筛选）'
+                    '17 区中 5 区上涨、11 区下跌、1 区持平。')
+    assert len(re.findall(_CN_BUDGET_RE_STR, body)) == 9   # 满配恰 9 不变量
+    assert body.count('。') <= 2
+
+    body = cn.render('district_mom', dict(full, n_up=0, n_flat=0, n_down=17,
+                                          broad_down=True,
+                                          )).split('<!-- cn-district_mom -->')[1].strip()
+    assert body == '**17 区全部下跌。**'               # 全跌月家数句省略（并列即矛盾）
+    body = cn.render('district_mom', dict(full, laggard_name=None, laggard_pct=None,
+                                          laggard_units=None)
+                     ).split('<!-- cn-district_mom -->')[1].strip()
+    assert body.startswith('**东城领涨，环比 32.8%（当月 725 套）。**'
+                           '（均按上月签约 500 套以上筛选）')
+    body = cn.render('district_mom', dict(full, n_up=16, n_down=1, n_flat=0,
+                                          broad_up=True)
+                     ).split('<!-- cn-district_mom -->')[1].strip()
+    assert '16/17 区上涨（普涨）' in body and '区持平' not in body
+    assert cn.render('district_mom', dict(full, narrative=False)) == ''
+    for bad in ('领先', '滞后', '领跑', '改善', '恶化', '回暖', '走强', '走弱'):
+        assert bad not in out
+
+
+def test_chart_narrative_render_area():
+    """C2：area render——满配恰 2/易主句/方向句/摆事实句（ceil 值）/退化空串。"""
+    import re
+    from analysis import chart_narrative as cn
+    full = dict(narrative=True, last_month='26-09', prev_month='26-08',
+                top_seg='60m2以下', top_share=31.0, prev_top_share=30.2,
+                top_delta_pp=0.8, top_changed=False, top_trigger=True,
+                max_abs_delta_pp=1.5)
+    body = cn.render('area_segment_share', full).split('<!-- cn-area_segment_share -->')[1].strip()
+    assert body == '**60m2以下占 31.0%（26-09）。**比 26-08 升 0.8 个百分点。'
+    assert len(re.findall(_CN_BUDGET_RE_STR, body)) == 2    # 满配恰 2 不变量
+    body = cn.render('area_segment_share', dict(full, top_changed=True)
+                     ).split('<!-- cn-area_segment_share -->')[1].strip()
+    assert '**60m2以下占 31.0%（26-09）。**60m2以下份额升至第一（31.0%）。' == body
+    assert len(re.findall(_CN_BUDGET_RE_STR, body)) == 2
+    body = cn.render('area_segment_share', dict(full, top_trigger=False)
+                     ).split('<!-- cn-area_segment_share -->')[1].strip()
+    assert '各段份额变化均在 ±1.5 个百分点内（26-08→26-09）。' in body
+    assert len(re.findall(_CN_BUDGET_RE_STR, body)) == 2
+    body = cn.render('area_segment_share', dict(full, top_delta_pp=-0.8)
+                     ).split('<!-- cn-area_segment_share -->')[1].strip()
+    assert '比 26-08 降 0.8 个百分点' in body
+    assert cn.render('area_segment_share', dict(full, narrative=False)) == ''
+
+
+def test_chart_narrative_render_refund():
+    """C2：refund render——满配恰 5/带上月值/断档半句/滚动跳句/退化空串。"""
+    import re
+    from analysis import chart_narrative as cn
+    full = dict(narrative=True, last_month='26-09', cur_rate=1.74,
+                prev_rate=1.96, delta_pp=-0.22, roll_last=2.06, roll_prev=2.25,
+                roll_months_adjacent=True)
+    body = cn.render('refund_rate', full).split('<!-- cn-refund_rate -->')[1].strip()
+    assert body == ('**26-09 上榜机构合计退房率 1.74%，比上月 1.96% 回落 0.22 个百分点。**'
+                    '近 3 个月滚动退房率 2.06%，比前一窗口回落 0.19 个百分点。')
+    assert len(re.findall(_CN_BUDGET_RE_STR, body)) == 5    # 满配恰 5 不变量
+    body = cn.render('refund_rate', dict(full, delta_pp=None, prev_rate=None)
+                     ).split('<!-- cn-refund_rate -->')[1].strip()
+    assert body.startswith('**26-09 上榜机构合计退房率 1.74%。**')  # 紧邻月断档 → 无环比半句
+    body = cn.render('refund_rate', dict(full, roll_months_adjacent=False)
+                     ).split('<!-- cn-refund_rate -->')[1].strip()
+    assert '近 3 个月' not in body
+    body = cn.render('refund_rate', dict(full, delta_pp=0.22)
+                     ).split('<!-- cn-refund_rate -->')[1].strip()
+    assert '上升 0.22 个百分点' in body
+    assert cn.render('refund_rate', dict(full, narrative=False)) == ''
+
+
 def test_monthly_table_arrow_ui():
     """UI 批（2026-11-02 用户验收）：月度表环比/同比 ▲/▼ 箭头——红涨绿跌着色、
     data-v 排序键不受箭头污染、数字列右对齐 CSS；"—"（无同比）裸格不套箭头。"""
