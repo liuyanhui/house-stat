@@ -913,6 +913,18 @@ def test_monthly_table_arrow_ui():
     assert '<td>—</td>' in html                   # 无同比裸格
     assert 'data-v="13.7"' in html and 'data-v="-0.5"' in html  # 箭头不污染排序键
     assert 'td[data-v]:not(:first-child)' in html  # 数字列右对齐 + 等宽数字
+    # 表格后无空行直接跟脚注行（2026-11-03 修复）：GFM 表止于无 '|' 行，
+    # 脚注不得被吞进表格当最后一行（长文本撑爆首列）
+    md += '*注：表格后直接跟注。*\n'
+    with tempfile.TemporaryDirectory() as tmp:
+        vendor = os.path.join(tmp, 'v.js')
+        with open(vendor, 'w', encoding='utf-8') as f:
+            f.write('/*v*/')
+        html2 = hr.md_to_html(md, image_dir=tmp, charts_dir=os.path.join(tmp, 'charts'),
+                              vendor_path=vendor, no_js=True)
+    assert '<td>*注：' not in html2 and '<td>注：' not in html2
+    assert html2.count('<tr>') == 3                       # 表头 + 2 数据行，无脚注行
+    assert '<p><em>注：表格后直接跟注。</em></p>' in html2
 
 
 def test_expand_estimated_days():

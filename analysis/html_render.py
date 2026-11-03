@@ -370,8 +370,10 @@ def _convert(md, image_dir, charts_ctx=None):
         # 表格：聚合连续非空行，判断是否表格块
         if '|' in line and not re.match(r"^\s{0,3}[-*+]\s", line):
             buf = []
+            # GFM：表格止于第一个无 '|' 的行（2026-11-03 修复——脚注行无空行
+            # 隔开时曾被吞进表格当最后一行，长文本撑爆首列）
             while i < n and re.match(r"^\s*$", lines[i]) is None and not re.match(r"^```", lines[i]) \
-                    and not re.match(r"^#{1,6}\s", lines[i]):
+                    and not re.match(r"^#{1,6}\s", lines[i]) and '|' in lines[i]:
                 # 列表项/引用属下一块，停止聚合
                 if re.match(r"^\s{0,3}([-*+]|\d+\.)\s", lines[i]) or re.match(r"^>\s?", lines[i]):
                     break
