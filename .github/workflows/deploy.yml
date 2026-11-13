@@ -1,0 +1,10 @@
+# house-stat 的部署调用器：注意本仓库主分支是 master
+name: deploy to family server
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+jobs:
+  deploy:
+    uses: liuyanhui/raw-pile/.github/workflows/family-deploy.yml@main
+    secrets: inherit
